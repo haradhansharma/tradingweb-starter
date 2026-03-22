@@ -1,0 +1,114 @@
+services:
+  # --------------------
+  # 1. BACKEND SERVICE (Django)
+  # --------------------
+  t_backend:
+    build: ./backend
+    container_name: t_backend
+    # Use reload for development; remove --reload in production
+    # command: gunicorn config.asgi:application \
+    # --workers 4 \
+    # --worker-class uvicorn.workers.UvicornWorker \
+    # --bind 0.0.0.0:8000 \
+    # --access-logformat '%(h)s %(l)s %(u)s %(t)s "%(r)s" %(s)s %(b)s "%(f)s" "%(a)s"' \
+    # --access-logfile /app/logs/gunicorn-access.log \
+    # --error-logfile /app/logs/gunicorn-error.log
+    # Use uvicorn directly for better reloading in dev
+    command: uvicorn config.asgi:application --host 0.0.0.0 --port 8000 --reload
+
+    
+    volumes:
+      - ./backend:/app
+      - t_static_volume:/app/staticfiles
+      - t_media_volume:/app/media
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    depends_on:
+      - t_db
+      - t_redis
+
+  # --------------------
+  # 2. DATABASE SERVICE
+  # --------------------
+  t_db:
+    image: postgres:16-alpine  # Fixed: Postgres 18 doesn't exist yet
+    container_name: t_postgres_db
+    environment:
+      POSTGRES_DB: ${T_DB_NAME}
+      POSTGRES_USER: ${T_DB_USER}
+      POSTGRES_PASSWORD: ${T_DB_PASSWORD}
+    volumes:
+      - t_postgres_data:/var/lib/postgresql/data/
+    ports:
+      - "5432:5432"
+
+  # --------------------
+  # 3. REDIS SERVICE
+  # --------------------
+  t_redis:
+    image: redis:7-alpine
+    container_name: t_redis
+    volumes:
+      - t_redis_data:/data
+    command: ["redis-server", "--appendonly", "yes"]
+
+  # --------------------
+  # 4. CELERY WORKER
+  # --------------------
+  t_celery:
+    build: ./backend
+    container_name: t_celery_worker
+    # Fixed: Project name is 'config', not 'backend'
+    command: celery -A config worker -l INFO
+    volumes:
+      - ./backend:/app
+    env_file:
+      - .env
+    depends_on:
+      - t_redis
+      - t_db
+      - t_backend
+
+      
+
+  # --------------------
+  # 5. FRONTEND SERVICE (Astro)
+  # --------------------
+  t_frontend:
+    build: ./frontend
+    container_name: t_frontend
+    ports:
+      - "4321:4321"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules # Prevents local node_modules from overwriting container ones
+    env_file:
+      - .env
+    command: npm run dev -- --host 0.0.0.0
+    depends_on:
+      - t_backend
+
+  # --------------------
+  # 6. CELERY BEAT (The Scheduler)
+  # --------------------
+  t_celery_beat:
+    build: ./backend
+    container_name: t_celery_beat
+    # Use the django_celery_beat scheduler so it looks at the DB
+    command: celery -A config beat -l INFO --scheduler django_celery_beat.schedulers:DatabaseScheduler
+    volumes:
+      - ./backend:/app
+    env_file:
+      - .env
+    depends_on:
+      - t_redis
+      - t_db
+      - t_backend
+
+volumes:
+  t_postgres_data:
+  t_static_volume:
+  t_media_volume:
+  t_redis_data:

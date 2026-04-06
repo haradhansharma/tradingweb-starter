@@ -8,6 +8,21 @@ class User(AbstractUser):
     bio = models.TextField(max_length=500, blank=True)
     reputation = models.IntegerField(default=0)
     avatar = models.ImageField(upload_to="avatars/", null=True, blank=True)
+    tracked_assets = models.JSONField(default=list, blank=True)
+    risk_tolerance = models.CharField(
+        max_length=20,
+        choices=[
+            ("conservative", "Conservative"),
+            ("moderate", "Moderate"),
+            ("aggressive", "Aggressive"),
+        ],
+        default="moderate",
+    )
+
+    # Notification preferences
+    notify_strong_signals = models.BooleanField(default=True)
+    notify_whale_activity = models.BooleanField(default=True)
+    notify_market_shifts = models.BooleanField(default=True)
 
     def __str__(self):
 

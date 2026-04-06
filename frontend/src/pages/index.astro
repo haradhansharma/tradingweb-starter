@@ -1,17 +1,48 @@
 ---
+/**
+ * backend/src/pages/index.astro
+ * Dashboard Page — Main Options Analysis View
+ * =============================================
+ * Renders:
+ *   - AssetSelector (filter buttons)
+ *   - AssetCard per underlying (from filteredAssets)
+ *
+ * All data is reactive via Alpine.js x-data="dashboard()"
+ * which is set on the <html> element in DashboardLayout.astro.
+ * Every Alpine directive in child components shares this scope.
+ */
 
+import DashboardLayout from '../layouts/DashboardLayout.astro';
+import AssetSelector from '../components/dashboard/AssetSelector.astro';
+import AssetCard from '../components/dashboard/AssetCard.astro';
 ---
 
-<html lang="en">
-	<head>
-		<meta charset="utf-8" />
-		<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-		<link rel="icon" href="/favicon.ico" />
-		<meta name="viewport" content="width=device-width" />
-		<meta name="generator" content={Astro.generator} />
-		<title>Astro</title>
-	</head>
-	<body>
-		<h1>Astro Working</h1>
-	</body>
-</html>
+<DashboardLayout title="MarketPulse — Options Analysis">
+  <div class="p-5 space-y-5 max-w-[1400px]">
+
+    <!-- ── Asset Selector ── -->
+    <AssetSelector />
+
+    <!-- ── Asset Cards ── -->
+    <section class="space-y-4" aria-label="Analysis results">
+      <template x-for="a in filteredAssets" :key="a.symbol">
+        <AssetCard />
+      </template>
+
+      <!-- Empty state: no assets loaded yet -->
+      <div x-show="filteredAssets.length === 0" class="text-center py-20">
+        <div class="inline-flex items-center gap-2 text-gray-400 dark:text-gray-500">
+          <svg class="w-5 h-5 connect-pulse" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+          </svg>
+          <span class="text-[13px] font-medium">Waiting for market data...</span>
+        </div>
+        <p class="text-[11px] text-gray-300 dark:text-gray-600 mt-2">
+          Connecting to WebSocket stream for live intelligence signals.
+        </p>
+      </div>
+    </section>
+
+    <div class="h-6"></div>
+  </div>
+</DashboardLayout>

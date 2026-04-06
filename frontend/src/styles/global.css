@@ -1,0 +1,353 @@
+/* tradingweb/frontend/src/styles/global.css */
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+/* ── Dark mode: class strategy ── */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ══════════════════════════════════════════
+   THEME BLOCK 1 — Static values
+   (colors, fonts, animations registered with Tailwind)
+   ══════════════════════════════════════════ */
+@theme {
+  /* ── Starwind accordion animations ── */
+  --animate-accordion-down: accordion-down 0.2s ease-out;
+  --animate-accordion-up: accordion-up 0.2s ease-out;
+
+  @keyframes accordion-down {
+    from {
+      height: 0;
+    }
+    to {
+      height: var(--starwind-accordion-content-height);
+    }
+  }
+
+  @keyframes accordion-up {
+    from {
+      height: var(--starwind-accordion-content-height);
+    }
+    to {
+      height: 0;
+    }
+  }
+
+  /* ── Dashboard: surface palette ── */
+  --color-surface-900: #0a0b0e;
+  --color-surface-800: #0f1117;
+  --color-surface-700: #13141a;
+  --color-surface-600: #181a22;
+  --color-surface-500: #1e2028;
+  --color-surface-400: #22242e;
+  --color-surface-300: #2a2c38;
+
+  /* ── Dashboard: border accents ── */
+  --color-border-dark: #1a1c24;
+  --color-border-darker: #1c1d25;
+
+  /* ── Dashboard: font families ── */
+  --font-family-display: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
+  --font-family-body: 'DM Sans', ui-sans-serif, system-ui, sans-serif;
+
+  /* ── Dashboard: market animations ── */
+  --animate-pulse-live: pulse-live 2s ease-in-out infinite;
+  --animate-flash-up: flash-up 0.6s ease-out;
+  --animate-flash-down: flash-down 0.6s ease-out;
+  --animate-connect-pulse: connect-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes pulse-live {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.4;
+    transform: scale(0.8);
+  }
+}
+
+@keyframes flash-up {
+  0% {
+    background-color: rgba(16, 185, 129, 0.12);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+@keyframes flash-down {
+  0% {
+    background-color: rgba(239, 68, 68, 0.12);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+@keyframes connect-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
+/* ══════════════════════════════════════════
+   THEME BLOCK 2 — Dynamic tokens (inline)
+   (Starwind shadcn-style design tokens — these map CSS vars to Tailwind utilities)
+   ══════════════════════════════════════════ */
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-accent: var(--primary-accent);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary-accent: var(--secondary-accent);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-error: var(--error);
+  --color-error-foreground: var(--error-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-outline: var(--outline);
+
+  --radius-xs: calc(var(--radius) - 0.375rem);
+  --radius-sm: calc(var(--radius) - 0.25rem);
+  --radius-md: calc(var(--radius) - 0.125rem);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 0.25rem);
+  --radius-2xl: calc(var(--radius) + 0.5rem);
+  --radius-3xl: calc(var(--radius) + 1rem);
+
+  --color-sidebar: var(--sidebar-background);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-outline: var(--sidebar-outline);
+}
+
+/* ══════════════════════════════════════════
+   DESIGN TOKENS — Light mode
+   ══════════════════════════════════════════ */
+:root {
+  --background: var(--color-white);
+  --foreground: var(--color-neutral-950);
+  --card: var(--color-white);
+  --card-foreground: var(--color-neutral-950);
+  --popover: var(--color-white);
+  --popover-foreground: var(--color-neutral-950);
+  --primary: var(--color-blue-700);
+  --primary-foreground: var(--color-neutral-50);
+  --primary-accent: var(--color-blue-700);
+  --secondary: var(--color-neutral-200);
+  --secondary-foreground: var(--color-neutral-950);
+  --secondary-accent: var(--color-neutral-950);
+  --muted: var(--color-neutral-100);
+  --muted-foreground: var(--color-neutral-600);
+  --accent: var(--color-neutral-100);
+  --accent-foreground: var(--color-neutral-900);
+  --info: var(--color-sky-300);
+  --info-foreground: var(--color-sky-950);
+  --success: var(--color-green-300);
+  --success-foreground: var(--color-green-950);
+  --warning: var(--color-amber-300);
+  --warning-foreground: var(--color-amber-950);
+  --error: var(--color-red-700);
+  --error-foreground: var(--color-neutral-50);
+  --border: var(--color-neutral-200);
+  --input: var(--color-neutral-200);
+  --outline: var(--color-neutral-400);
+  --radius: 0.625rem;
+
+  /* sidebar */
+  --sidebar-background: var(--color-neutral-50);
+  --sidebar-foreground: var(--color-neutral-950);
+  --sidebar-primary: var(--color-blue-700);
+  --sidebar-primary-foreground: var(--color-neutral-50);
+  --sidebar-accent: var(--color-neutral-100);
+  --sidebar-accent-foreground: var(--color-neutral-900);
+  --sidebar-border: var(--color-neutral-200);
+  --sidebar-outline: var(--color-neutral-400);
+}
+
+/* ══════════════════════════════════════════
+   DESIGN TOKENS — Dark mode
+   ══════════════════════════════════════════ */
+.dark {
+  --background: var(--color-neutral-950);
+  --foreground: var(--color-neutral-50);
+  --card: var(--color-neutral-900);
+  --card-foreground: var(--color-neutral-50);
+  --popover: var(--color-neutral-800);
+  --popover-foreground: var(--color-neutral-50);
+  --primary: var(--color-blue-700);
+  --primary-foreground: var(--color-neutral-50);
+  --primary-accent: var(--color-blue-400);
+  --secondary: var(--color-neutral-800);
+  --secondary-foreground: var(--color-neutral-50);
+  --secondary-accent: var(--color-neutral-50);
+  --muted: var(--color-neutral-800);
+  --muted-foreground: var(--color-neutral-400);
+  --accent: var(--color-neutral-700);
+  --accent-foreground: var(--color-neutral-100);
+  --info: var(--color-sky-300);
+  --info-foreground: var(--color-sky-950);
+  --success: var(--color-green-300);
+  --success-foreground: var(--color-green-950);
+  --warning: var(--color-amber-300);
+  --warning-foreground: var(--color-amber-950);
+  --error: var(--color-red-800);
+  --error-foreground: var(--color-neutral-50);
+
+  /* FIX: --alpha() is not valid CSS — use color-mix for semi-transparent borders */
+  --border: color-mix(in oklch, var(--color-neutral-50) 10%, transparent);
+  --input: color-mix(in oklch, var(--color-neutral-50) 15%, transparent);
+  --outline: var(--color-neutral-500);
+
+  /* sidebar */
+  --sidebar-background: var(--color-neutral-900);
+  --sidebar-foreground: var(--color-neutral-50);
+  --sidebar-primary: var(--color-blue-700);
+  --sidebar-primary-foreground: var(--color-neutral-50);
+  --sidebar-accent: var(--color-neutral-800);
+  --sidebar-accent-foreground: var(--color-neutral-100);
+  --sidebar-border: var(--color-neutral-800);
+  --sidebar-outline: var(--color-neutral-600);
+}
+
+/* ══════════════════════════════════════════
+   BASE STYLES
+   ══════════════════════════════════════════ */
+@layer base {
+  * {
+    @apply border-border outline-outline/50;
+  }
+
+  body {
+    @apply bg-background text-foreground scheme-light dark:scheme-dark;
+  }
+
+  button {
+    @apply cursor-pointer;
+  }
+
+  /* ── Dashboard overrides ── */
+  html {
+    font-family: var(--font-family-body);
+  }
+
+  .font-display {
+    font-family: var(--font-family-display);
+  }
+
+  /* Alpine.js cloak — hide until Alpine initializes */
+  [x-cloak] {
+    display: none !important;
+  }
+
+  /* Respect reduced motion */
+  @media (prefers-reduced-motion: reduce) {
+    .live-dot,
+    .flash-up,
+    .flash-down,
+    .connect-pulse,
+    .asset-select-btn,
+    .decision-surface,
+    .nav-item {
+      animation: none !important;
+      transition: none !important;
+    }
+  }
+}
+
+/* ══════════════════════════════════════════
+   DASHBOARD UTILITIES
+   ══════════════════════════════════════════ */
+
+/* Custom scrollbar */
+@utility dash-scroll {
+  &::-webkit-scrollbar {
+    width: 5px;
+    height: 5px;
+  }
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  &::-webkit-scrollbar-thumb {
+    background: #d1d5db;
+    border-radius: 3px;
+  }
+  .dark &::-webkit-scrollbar-thumb {
+    background: #374151;
+  }
+}
+
+/* Navigation item */
+@utility nav-item {
+  transition: all 0.15s ease;
+  border-left: 3px solid transparent;
+  &:hover {
+    background: rgba(255, 255, 255, 0.04);
+    border-left-color: rgba(16, 185, 129, 0.35);
+  }
+}
+
+@utility nav-item-active {
+  background: rgba(16, 185, 129, 0.07);
+  border-left-color: #10b981;
+  color: #10b981 !important;
+}
+
+/* Asset selector button */
+@utility asset-select-btn {
+  transition: all 0.15s ease;
+}
+
+/* Decision surface */
+@utility decision-surface {
+  transition:
+    background-color 0.35s ease,
+    border-color 0.35s ease,
+    color 0.35s ease;
+}
+
+/* ── Animation shortcut classes ── */
+/* These match the HTML class names used in Alpine.js bindings.
+   Tailwind v4 --animate-* tokens create `animate-X` utilities;
+   these @utility rules provide the short-form class names (no prefix) */
+@utility flash-up {
+  animation: flash-up 0.6s ease-out;
+}
+
+@utility flash-down {
+  animation: flash-down 0.6s ease-out;
+}
+
+@utility connect-pulse {
+  animation: connect-pulse 1.4s ease-in-out infinite;
+}
+
+@utility live-dot {
+  animation: pulse-live 2s ease-in-out infinite;
+}

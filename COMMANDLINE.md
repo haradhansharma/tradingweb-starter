@@ -97,7 +97,10 @@ npm install
 
 # Start development server
 npm run dev
-
+docker compose exec t_frontend npm run check
+docker compose exec t_frontend npm run lint
+docker compose exec t_frontend npm run format
+docker compose exec t_frontend npm run typecheck
 # Run quality checks
 npm run check      # Astro type checking
 npm run lint       # ESLint
@@ -164,6 +167,38 @@ docker compose logs -f t_celery
 
 # Restart worker
 docker compose restart t_celery
+
+# Trigger the sync task immediately
+docker exec -it t_celery_worker celery -A config call tradingweb.backend.apps.common.tasks.sync_exchange_structure
+
+# Or if that doesn't work, try:
+docker exec -it t_celery_worker python manage.py shell -c "
+from apps.common.tasks import sync_exchange_structure
+sync_exchange_structure.delay()
+"
+
+docker exec -it t_celery_worker python manage.py shell -c "
+from apps.common.tasks import sync_open_interest
+sync_open_interest.delay()
+"
+
+docker exec -it t_celery_worker python manage.py shell -c "
+from apps.common.tasks import sync_tickers_rest
+sync_tickers_rest.delay()
+"
+
+docker exec -it t_celery_worker python manage.py shell -c "
+from apps.common.tasks import sync_recent_trades_rest
+sync_recent_trades_rest.delay()
+"
+
+docker exec -it t_celery_worker python manage.py shell -c "
+from apps.common.tasks import sync_exchange_structure, sync_open_interest, sync_tickers_rest, sync_recent_trades_rest
+sync_exchange_structure.delay()
+sync_open_interest.delay()
+sync_tickers_rest.delay()
+sync_recent_trades_rest.delay()
+"
 ```
 
 ### Celery Beat (Scheduler)
@@ -188,6 +223,22 @@ docker compose exec t_redis redis-cli info
 
 # Clear Redis data
 docker compose exec t_redis redis-cli flushall
+
+# Flush all Redis databases (DB0-DB3)
+docker exec -it <redis_container_name> redis-cli FLUSHALL
+
+# Or flush a specific database only:
+# DB0 (cache) - where active underlyings are stored
+docker exec -it <redis_container_name> redis-cli -n 0 FLUSHDB
+
+# DB1 (Celery results)
+docker exec -it <redis_container_name> redis-cli -n 1 FLUSHDB
+
+# DB2 (Channels)
+docker exec -it <redis_container_name> redis-cli -n 2 FLUSHDB
+
+# DB3 (Pub/Sub intelligence data)
+docker exec -it <redis_container_name> redis-cli -n 3 FLUSHDB
 ```
 
 ## 📊 Monitoring & Logs
@@ -249,6 +300,9 @@ docker compose build --no-cache
 
 ### Clean Up
 ```bash
+docker builder prune -f
+docker container prune -f
+
 # Stop all services
 docker compose down
 
@@ -260,6 +314,7 @@ docker compose down --rmi all
 
 # Clean up unused Docker resources
 docker system prune -a --volumes
+
 ```
 
 ### Reset Everything

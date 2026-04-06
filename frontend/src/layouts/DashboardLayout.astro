@@ -1,0 +1,86 @@
+---
+/**
+ * /tradingweb/frontend/src/layouts/DashboardLayout.astro
+ * DashboardLayout — MarketPulse Shell
+ * ======================================
+ * Wraps all dashboard pages with:
+ *   - Fixed sidebar (left)
+ *   - Fixed topbar (top)
+ *   - Scrollable main content area
+ *   - Google Fonts (Space Grotesk + DM Sans)
+ *   - Tailwind dark mode class on <html>
+ */
+
+import Sidebar from '../components/dashboard/Sidebar.astro';
+import Topbar from '../components/dashboard/Topbar.astro';
+import '../styles/global.css';
+
+interface Props {
+  title?: string;
+}
+
+const { title = 'MarketPulse — Options Analysis' } = Astro.props;
+---
+
+<!DOCTYPE html>
+<html lang="en" x-data="dashboard()" x-init="init()" :class="{ 'dark': darkMode }" class="h-full" x-cloak>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Real-time Futures Trading Signals based on Options Data" />
+    <title>{title}</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+
+    <!-- Google Fonts: Space Grotesk (display) + DM Sans (body) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700&family=Space+Grotesk:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+
+    <!-- Alpine.js + Store: loaded as ES module via script tag -->
+    <script>
+      declare global {
+        interface Window {
+          Alpine: any;
+        }
+      }
+      // Import store inline so Alpine.js can access it via window
+      import { createDashboardStore } from '../stores/dashboard.ts';
+
+      // Initialize store and make it globally accessible to Alpine
+      const store = createDashboardStore();
+
+      // Expose to Alpine.js as global data function
+      document.addEventListener('alpine:init', () => {
+        // Merge store properties into Alpine's root data
+        Alpine.data('dashboard', () => store);
+      });
+
+      // Initialize WebSocket connections after Alpine mounts
+      // Note: init() is called via x-init on <html> tag instead
+
+      // Cleanup on page navigation
+      document.addEventListener('astro:before-swap', () => {
+        store.destroy();
+      });
+    </script>
+  </head>
+
+  <body class="h-full">
+    <!-- Sidebar (fixed, z-50) -->
+    <Sidebar />
+
+    <!-- Topbar (fixed, z-40) -->
+    <Topbar />
+
+    <!-- Scrollable main content -->
+    <main
+      class="ml-[228px] mt-[52px] dash-scroll overflow-y-auto transition-colors duration-300"
+      style="height: calc(100vh - 52px)"
+    >
+      <slot />
+    </main>
+  </body>
+</html>

@@ -36,6 +36,7 @@ INSTALLED_APPS = [
     "django.contrib.sites",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "corsheaders",
     "channels",
     "django_celery_results",
     "django_celery_beat",
@@ -46,6 +47,7 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
+    "corsheaders.middleware.CorsMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
@@ -53,6 +55,7 @@ MIDDLEWARE = [
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "django.contrib.sites.middleware.CurrentSiteMiddleware",
 ]
+CORS_ALLOW_ALL_ORIGINS = True
 
 ROOT_URLCONF = "config.urls"
 
@@ -117,38 +120,47 @@ USE_L10N = True
 USE_TZ = True
 
 
-CHANNEL_LAYERS = {
-    "default": {
-        "BACKEND": "channels_redis.core.RedisChannelLayer",
-        "CONFIG": {
-            "hosts": [(env("REDIS_HOST"), int(env("REDIS_PORT")))],
-        },
-    },
-}
-CELERY_BROKER_URL = f'redis://{env("REDIS_HOST")}:{env("REDIS_PORT")}/1'
-CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
-CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
-CELERY_RESULT_EXTENDED = True
-CELERY_CACHE_BACKEND = "default"
-CELERY_RESULT_BACKEND = "django-db"
-CELERY_TASK_TIME_LIMIT = 30 * 60
-CELERY_TASK_TRACK_STARTED = True
-CELERY_TIMEZONE = "UTC"
+REDIS_HOST = env("REDIS_HOST", default="localhost")
+REDIS_PORT = env("REDIS_PORT", default=6379)
 
 
-CACH_URL = f'redis://{env("REDIS_HOST")}:{env("REDIS_PORT")}/0'
-CACHE_MIDDLEWARE_SECONDS = 3600
-
+CACHE_URL = f"redis://{REDIS_HOST}:{REDIS_PORT}/0"
 CACHES = {
     "default": {
         "BACKEND": "django_redis.cache.RedisCache",
-        "LOCATION": CACH_URL,
+        "LOCATION": CACHE_URL,
         "OPTIONS": {
             "CLIENT_CLASS": "django_redis.client.DefaultClient",
         },
     }
 }
 
+
+# --- DATABASE 1: Celery Broker ---
+CELERY_BROKER_URL = f"redis://{REDIS_HOST}:{REDIS_PORT}/1"
+CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
+CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
+CELERY_RESULT_EXTENDED = True
+CELERY_RESULT_BACKEND = (
+    "django-db"  # Using DB instead of Redis for results is good for persistence
+)
+CELERY_CACHE_BACKEND = "default"
+CELERY_TASK_TIME_LIMIT = 30 * 60
+CELERY_TASK_TRACK_STARTED = True
+CELERY_TIMEZONE = "UTC"
+
+
+# --- DATABASE 2: Django Channels (WebSockets) ---
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {
+            "hosts": [f"redis://{REDIS_HOST}:{REDIS_PORT}/2"],
+        },
+    },
+}
+# --- DATABASE 3: Custom Pub/Sub (Real-time Intelligence Broadcasts) ---
+REDIS_PUBSUB_URL = f"redis://{REDIS_HOST}:{REDIS_PORT}/3"
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
@@ -289,3 +301,15 @@ LOGGING = {
 
 
 AUTH_USER_MODEL = "users.User"
+
+BINANCE_API_KEY = env("T_BINANCE_API_KEY", default="")
+BINANCE_API_SECRET = env("T_BINANCE_API_SECRET", default="")
+
+# ---------------------------------------------------------------------------
+# Binance Rate Limits (matches exchange info: 2400 weight/minute)
+# ---------------------------------------------------------------------------
+BINANCE_RATE_LIMITS = {
+    "requests_per_second": 50,
+    "semaphore_limit": 5,         # Max concurrent async REST requests
+    "inter_request_delay": 0.1,   # Seconds between requests (burst prevention)
+}

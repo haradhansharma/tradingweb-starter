@@ -1,3 +1,5 @@
+# backend/apps/common/admin.py
+
 from django.contrib import admin
 from django.contrib.sites.models import Site
 from django.contrib.sites.admin import SiteAdmin

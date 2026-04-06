@@ -1,69 +1,66 @@
-# TradingWeb Project Structure
+.
+├── backend
+│   ├── api
+│   │   ├── __init__.py
+│   │   └── router.py
+│   ├── apps
+│   │   ├── common
+│   │   ├── users
+│   │   └── __init__.py
+│   ├── config
+│   │   ├── __init__.py
+│   │   ├── asgi.py
+│   │   ├── celery.py
+│   │   ├── settings.py
+│   │   ├── urls.py
+│   │   └── wsgi.py
+│   ├── logs
+│   │   ├── debug.log
+│   │   ├── error.log
+│   │   └── info.log
+│   ├── staticfiles
+│   ├── templates
+│   ├── Dockerfile
+│   ├── manage.py
+│   ├── requirements.txt
+│   └── worklog.md
+├── frontend
+│   ├── .vscode
+│   │   ├── extensions.json
+│   │   ├── launch.json
+│   │   └── starwind.code-snippets
+│   ├── public
+│   │   ├── favicon.ico
+│   │   └── favicon.svg
+│   ├── src
+│   │   ├── components
+│   │   ├── constants
+│   │   ├── hooks
+│   │   ├── layouts
+│   │   ├── lib
+│   │   ├── pages
+│   │   ├── stores
+│   │   ├── styles
+│   │   ├── types
+│   │   └── utils
+│   ├── .eslintignore
+│   ├── .eslintrc.cjs
+│   ├── .prettierrc
+│   ├── Dockerfile
+│   ├── README.md
+│   ├── astro.config.mjs
+│   ├── package-lock.json
+│   ├── package.json
+│   ├── starwind.config.json
+│   └── tsconfig.json
+├── .env
+├── .env.example
+├── .gitignore
+├── COMMANDLINE.md
+├── PROJECT_STRUCTURE.md
+├── docker-compose.override.yml
+├── docker-compose.yml
+├── editing.py
+└── requirements.txt
 
-This file documents the project structure for the `tradingweb` repository.
-Environment folders such as `venv` and system-generated directories (`node_modules`, `.cache`, etc.) are intentionally excluded.
-
-## Root
-
-- `docker-compose.yml`
-- `backend/`
-- `frontend/`
-
-## backend/
-
-- `Dockerfile`
-- `manage.py`
-- `requirements.txt`
-- `api/`
-  - `__init__.py`
-  - `router.py`
-- `apps/`
-  - `__init__.py`
-  - `users/`
-    - `__init__.py`
-    - `admin.py`
-    - `apps.py`
-    - `models.py`
-    - `tests.py`
-    - `views.py`
-    - `migrations/`
-      - `__init__.py`
-- `config/`
-  - `__init__.py`
-  - `asgi.py`
-  - `celery.py`
-  - `settings.py`
-  - `urls.py`
-  - `wsgi.py`
-- `logs/`
-- `media/`
-- `static/`
-- `staticfiles/`
-- `templates/`
-
-## frontend/
-
-- `astro.config.mjs`
-- `Dockerfile`
-- `package.json`
-- `README.md`
-- `tsconfig.json`
-- `public/`
-- `src/`
-  - `components/`
-    - `common/`
-    - `dashboard/`
-    - `trading/`
-  - `constants/`
-  - `hooks/`
-  - `layouts/`
-  - `lib/`
-    - `api/`
-    - `utils/`
-  - `pages/`
-    - `index.astro`
-  - `styles/`
-  - `types/`
-  - `utils/`
-- `.vscode/`
-- `.astro/` (build artifact)
+23 directories, 40 files

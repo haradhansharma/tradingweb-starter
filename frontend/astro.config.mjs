@@ -1,61 +1,52 @@
-// tradingweb/frontend/astro.config.mjs
 // @ts-check
-// @ts-ignore
 import { defineConfig } from 'astro/config';
+import node from '@astrojs/node';
+import tailwindcss from '@tailwindcss/vite';
+import alpinejs from '@astrojs/alpinejs';
+import sitemap from '@astrojs/sitemap';
 
 // https://astro.build/config
 export default defineConfig({
-  // Enable dev toolbar for better debugging
-  devToolbar: {
-    enabled: true,
-  },
+  site: process.env.SITE_URL || 'https://yourdomain.com',
 
-  // Server configuration for development
-  server: {
-    host: true, // Listen on all addresses
-    port: 4321,
-  },
+  output: 'server',
+  adapter: node({
+    mode: 'standalone'
+  }),
 
-  // Vite configuration
   vite: {
+    plugins: [tailwindcss()],
     server: {
-      watch: {
-        usePolling: true, // Better file watching in containers
-      },
-      // Enable HMR with proper host for Docker
-      hmr: {
-        host: 'localhost',
+      proxy: {
+        '/api': {
+          target: process.env.BACKEND_URL || 'http://tbackend:8000',  // always proxy
+          changeOrigin: true,
+        },
+        '/ws': {
+          target: process.env.BACKEND_URL_WS || 'ws://tbackend:8000',  // always proxy
+          ws: true,
+        },
       },
     },
-    // Optimize build
-    build: {
-      sourcemap: true, // Enable source maps for debugging
-    },
-    // Resolve aliases for cleaner imports
     resolve: {
-      alias: {
+      alias: { 
         '@': '/src',
         '@components': '/src/components',
         '@layouts': '/src/layouts',
-        '@pages': '/src/pages',
+        '@assets': '/src/assets',
         '@utils': '/src/utils',
-        '@types': '/src/types',
-        '@styles': '/src/styles',
-        '@hooks': '/src/hooks',
-        '@constants': '/src/constants',
-        '@lib': '/src/lib',
+        '@styles': '/src/styles', 
+        '@stores': '/src/stores'  
       },
     },
   },
 
-  // Output configuration
-  output: 'server', // SSR for better performance and SEO
-  adapter: undefined, // Will be added when deploying
+  integrations: [alpinejs(), sitemap()],
 
-  // Image optimization
-  image: {
-    service: {
-      entrypoint: 'astro/assets/services/sharp',
-    },
+  server: {
+    // Allows Docker to access the dev server
+    host: '0.0.0.0',
+    port: process.env.PORT ? parseInt(process.env.PORT) : 4321,
   },
+
 });

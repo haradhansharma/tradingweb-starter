@@ -2,9 +2,9 @@ services:
   # --------------------
   # 1. BACKEND SERVICE (Django)
   # --------------------
-  t_backend:
+  tbackend:
     build: ./backend
-    container_name: t_backend
+    container_name: tbackend
     # Use reload for development; remove --reload in production
     # command: gunicorn config.asgi:application \
     # --workers 4 \
@@ -28,6 +28,8 @@ services:
     depends_on:
       - t_db
       - t_redis
+    networks:
+      - trading_net
 
   # --------------------
   # 2. DATABASE SERVICE
@@ -39,10 +41,17 @@ services:
       POSTGRES_DB: ${T_DB_NAME}
       POSTGRES_USER: ${T_DB_USER}
       POSTGRES_PASSWORD: ${T_DB_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${T_DB_USER} -d ${T_DB_NAME}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
     volumes:
       - t_postgres_data:/var/lib/postgresql/data/
     ports:
       - "5432:5432"
+    networks:
+      - trading_net
 
   # --------------------
   # 3. REDIS SERVICE
@@ -52,7 +61,20 @@ services:
     container_name: t_redis
     volumes:
       - t_redis_data:/data
-    command: ["redis-server", "--appendonly", "yes"]
+    command: >
+      redis-server 
+      --appendonly yes 
+      --maxclients 10000 
+      --timeout 300 
+      --tcp-keepalive 60
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - trading_net
+
 
   # --------------------
   # 4. CELERY WORKER
@@ -61,7 +83,8 @@ services:
     build: ./backend
     container_name: t_celery_worker
     # Fixed: Project name is 'config', not 'backend'
-    command: celery -A config worker -l INFO
+    # Listen to both default and websocket queues since we have one worker
+    command: celery -A config worker -l INFO -Q default,websocket,celery
     volumes:
       - ./backend:/app
     env_file:
@@ -69,26 +92,31 @@ services:
     depends_on:
       - t_redis
       - t_db
-      - t_backend
+      - tbackend
+    networks:
+      - trading_net
 
       
 
   # --------------------
   # 5. FRONTEND SERVICE (Astro)
   # --------------------
-  t_frontend:
+  tfrontend:
     build: ./frontend
-    container_name: t_frontend
+    container_name: tfrontend
     ports:
       - "4321:4321"
     volumes:
       - ./frontend:/app
       - /app/node_modules # Prevents local node_modules from overwriting container ones
+      - /app/node_modules/.vite # Prevents .vite cache conflicts
     env_file:
       - .env
     command: npm run dev -- --host 0.0.0.0
     depends_on:
-      - t_backend
+      - tbackend
+    networks:
+      - trading_net
 
   # --------------------
   # 6. CELERY BEAT (The Scheduler)
@@ -103,10 +131,91 @@ services:
     env_file:
       - .env
     depends_on:
-      - t_redis
-      - t_db
-      - t_backend
+      t_db:               # Indented correctly now
+        condition: service_healthy
+      t_redis:            # Indented correctly now
+        condition: service_healthy
+      tbackend:           # Indented correctly now
+        condition: service_started
+    networks:
+      - trading_net
 
+  # --------------------
+  # 7. INIT SYNC (Runs once before streamer — blocking)
+  # --------------------
+  # t_init_sync:
+  #   build: ./backend
+  #   container_name: t_init_sync
+  #   # '|' is the fix: it preserves your newlines so Python sees a script, not a sentence.
+  #   command:
+  #     - /bin/bash
+  #     - -c
+  #     - |
+  #       echo '=== Starting initial data sync from Binance ==='
+  #       python manage.py shell <<EOF
+  #       from apps.common.tasks import (
+  #           sync_exchange_structure, 
+  #           sync_open_interest, 
+  #           sync_tickers_rest, 
+  #           sync_recent_trades_rest
+  #       )
+
+  #       print('Syncing exchange structure...')
+  #       r1 = sync_exchange_structure.apply()
+  #       print(f'  -> {r1.result}')
+
+  #       print('Syncing open interest...')
+  #       r2 = sync_open_interest.apply()
+  #       print(f'  -> {r2.result}')
+
+  #       print('Syncing tickers...')
+  #       r3 = sync_tickers_rest.apply()
+  #       print(f'  -> {r3.result}')
+
+  #       print('Syncing trades...')
+  #       r4 = sync_recent_trades_rest.apply()
+  #       print(f'  -> {r4.result}')
+
+  #       print('=== All sync tasks completed. ===')
+  #       EOF
+  #   volumes:
+  #     - ./backend:/app
+  #   env_file:
+  #     - .env
+  #   depends_on:
+  #     t_redis:
+  #       condition: service_healthy
+  #     t_db:
+  #       condition: service_healthy
+  #     tbackend:
+  #       condition: service_started
+  #   networks:
+  #     - trading_net
+
+  # --------------------
+  # 7. BINANCE STREAMER (Dedicated Process)
+  # --------------------
+  t_binance_streamer:
+    build: ./backend
+    container_name: t_binance_streamer
+    command: python manage.py binance_streamer
+    volumes:
+      - ./backend:/app
+    env_file:
+      - .env
+    depends_on:
+      t_redis:
+        condition: service_healthy
+      t_db:
+        condition: service_healthy
+      # t_init_sync:
+      #   condition: service_completed_successfully
+    restart: on-failure
+    networks:
+      - trading_net
+networks:
+  trading_net:
+    driver: bridge
 volumes:
   t_postgres_data:
   t_static_volume:

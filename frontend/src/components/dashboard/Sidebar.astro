@@ -1,0 +1,84 @@
+---
+/**
+ * tradingweb/frontend/src/components/dashboard/Sidebar.astro
+ * Sidebar — MarketPulse Navigation
+ * ===================================
+ * Fixed left sidebar with branding, navigation sections,
+ * and user profile. Reads reactive state from the Alpine.js
+ * dashboard store (activeNav).
+ */
+---
+
+<aside
+  class="fixed left-0 top-0 bottom-0 w-[228px] bg-surface-800 border-r border-surface-500 z-50 flex flex-col"
+  role="navigation"
+  aria-label="Main navigation"
+>
+  <!-- ── Branding ── -->
+  <div class="h-14 flex items-center px-5 border-b border-surface-500 shrink-0">
+    <div class="flex items-center gap-2.5">
+      <div class="w-8 h-8 rounded-lg bg-emerald-500/15 flex items-center justify-center">
+        <svg class="w-[18px] h-[18px] text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="22 7 13.5 15.5 8.5 10.5 2 17"></polyline>
+          <polyline points="16 7 22 7 22 13"></polyline>
+        </svg>
+      </div>
+      <span class="font-display font-semibold text-white text-[17px] tracking-tight">MarketPulse</span>
+    </div>
+  </div>
+
+  <!-- ── Navigation Sections ── -->
+  <nav class="flex-1 py-4 px-2.5 space-y-0.5 overflow-y-auto dash-scroll">
+    <!-- Overview section -->
+    <p class="px-3 mb-2 text-[10px] uppercase tracking-[.12em] text-gray-500 font-semibold">Overview</p>
+    <template x-for="item in navItems" :key="item.id">
+      <button
+        @click="activeNav = item.id"
+        :class="activeNav === item.id ? 'active' : ''"
+        class="nav-item w-full flex items-center gap-3 px-3 py-2.5 rounded-r-lg text-[13px] text-gray-400"
+        :aria-current="activeNav === item.id ? 'page' : false"
+      >
+        <span class="w-[18px] h-[18px] flex items-center justify-center" x-html="item.icon"></span>
+        <span x-text="item.label"></span>
+        <span
+          x-show="item.badge"
+          x-text="item.badge"
+          class="ml-auto bg-emerald-500/15 text-emerald-400 text-[10px] font-semibold px-1.5 py-0.5 rounded-full leading-none"
+        ></span>
+      </button>
+    </template>
+
+    <!-- System section -->
+    <div class="pt-4">
+      <p class="px-3 mb-2 text-[10px] uppercase tracking-[.12em] text-gray-500 font-semibold">System</p>
+    </div>
+    <template x-for="item in sysItems" :key="item.id">
+      <button
+        @click="activeNav = item.id"
+        :class="activeNav === item.id ? 'active' : ''"
+        class="nav-item w-full flex items-center gap-3 px-3 py-2.5 rounded-r-lg text-[13px] text-gray-400"
+      >
+        <span class="w-[18px] h-[18px] flex items-center justify-center" x-html="item.icon"></span>
+        <span x-text="item.label"></span>
+        <span
+          x-show="item.badge"
+          x-text="item.badge"
+          class="ml-auto bg-emerald-500/15 text-emerald-400 text-[10px] font-semibold px-1.5 py-0.5 rounded-full leading-none"
+        ></span>
+      </button>
+    </template>
+  </nav>
+
+  <!-- ── User Profile ── -->
+  <div class="p-4 border-t border-surface-500 shrink-0">
+    <div class="flex items-center gap-3">
+      <div class="w-9 h-9 rounded-full bg-gradient-to-br from-emerald-400 to-teal-600 flex items-center justify-center text-white font-display font-semibold text-xs">
+        JD
+      </div>
+      <div class="flex-1 min-w-0">
+        <p class="text-[13px] font-medium text-gray-200 truncate">John Doe</p>
+        <p class="text-[11px] text-gray-500 truncate">Pro Account</p>
+      </div>
+    </div>
+  </div>
+</aside>

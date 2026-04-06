@@ -1,0 +1,94 @@
+---
+/**
+ * tradingweb/frontend/src/components/dashboard/AssetCard.astro
+ * AssetCard — Per-Underlying Analysis Card
+ * ===========================================
+ * Displays:
+ *   1. Header: symbol, category, price, % change
+ *   2. 7 Calculation Variables grid (PCR, IV, Delta, Gamma, Skew, GEX, Signal)
+ *   3. Decision block with colored surface + BUY/SELL/CANCEL buttons
+ *
+ * Receives asset object from Alpine.js x-for="a in filteredAssets"
+ */
+---
+
+<article
+  class="bg-white dark:bg-surface-700 rounded-xl border border-gray-200/80 dark:border-surface-300 overflow-hidden transition-colors duration-300"
+  :class="a.flash === 'up' ? 'flash-up' : a.flash === 'down' ? 'flash-down' : ''"
+>
+  <!-- ── Card Header: Symbol, Category, Price, Change ── -->
+  <div class="flex items-center justify-between px-5 py-3.5 border-b border-gray-100 dark:border-surface-400">
+    <div class="flex items-center gap-3">
+      <span class="font-display font-bold text-[16px]" x-text="a.symbol"></span>
+      <span
+        class="text-[10px] font-medium px-2 py-0.5 rounded-md bg-gray-100 dark:bg-surface-600 text-gray-500 dark:text-gray-400"
+        x-text="a.category"
+      ></span>
+    </div>
+    <div class="flex items-center gap-4">
+      <span
+        class="font-display font-bold text-[18px] tracking-tight"
+        x-text="'$' + fmtPrice(a.price, a.decimals)"
+      ></span>
+      <span
+        class="font-display font-semibold text-[13px] px-2 py-0.5 rounded-md"
+        :class="a.change >= 0 ? 'text-emerald-500 bg-emerald-500/10' : 'text-red-500 bg-red-500/10'"
+        x-text="(a.change >= 0 ? '+' : '') + a.change.toFixed(2) + '%'"
+      ></span>
+    </div>
+  </div>
+
+  <!-- ── 7 Calculation Variables Grid ── -->
+  <div class="grid grid-cols-4 sm:grid-cols-7 gap-0 divide-x divide-y divide-gray-100 dark:divide-surface-400">
+    <template x-for="vl in varLabels" :key="vl.key">
+      <div class="px-4 py-3 flex flex-col justify-center">
+        <p
+          class="text-[10px] uppercase tracking-[.1em] font-semibold text-gray-400 dark:text-gray-500 mb-1"
+          x-text="vl.label"
+        ></p>
+        <p
+          class="font-display font-bold text-[17px] tracking-tight leading-none"
+          :class="a.vars[vl.key] === null ? 'text-gray-300 dark:text-gray-600' : ''"
+          x-text="fmtVar(vl.key, a.vars[vl.key])"
+        ></p>
+      </div>
+    </template>
+  </div>
+
+  <!-- ── Decision Block ── -->
+  <div
+    class="decision-surface px-5 py-5 flex items-center justify-between gap-4 border-t-2"
+    :class="decisionSurfaceClass(a.decision)"
+  >
+    <!-- Left: Decision label -->
+    <div class="flex items-center gap-5 min-w-0">
+      <div class="shrink-0">
+        <p class="text-[10px] uppercase tracking-[.15em] font-semibold opacity-50 mb-0.5">Decision</p>
+      </div>
+      <p
+        class="font-display font-bold text-[28px] tracking-tight leading-none truncate"
+        :class="a.decision === 'CONNECTING' ? 'connect-pulse' : ''"
+        x-text="a.decision"
+      ></p>
+    </div>
+
+    <!-- Right: Action buttons -->
+    <div class="flex items-center gap-2.5 shrink-0">
+      <button
+        class="px-7 py-2 rounded-lg bg-white/15 hover:bg-white/25 active:bg-white/30 text-white font-display font-bold text-[13px] tracking-wide transition-colors border border-white/10"
+        :disabled="a.decision === 'CONNECTING'"
+        :class="a.decision === 'CONNECTING' ? 'opacity-25 cursor-not-allowed' : 'cursor-pointer'"
+      >BUY</button>
+      <button
+        class="px-7 py-2 rounded-lg bg-white/15 hover:bg-white/25 active:bg-white/30 text-white font-display font-bold text-[13px] tracking-wide transition-colors border border-white/10"
+        :disabled="a.decision === 'CONNECTING'"
+        :class="a.decision === 'CONNECTING' ? 'opacity-25 cursor-not-allowed' : 'cursor-pointer'"
+      >SELL</button>
+      <button
+        class="px-5 py-2 rounded-lg bg-transparent hover:bg-white/10 text-white/60 hover:text-white/90 font-display font-semibold text-[13px] transition-colors"
+        :disabled="a.decision === 'CONNECTING'"
+        :class="a.decision === 'CONNECTING' ? 'opacity-25 cursor-not-allowed' : 'cursor-pointer'"
+      >CANCEL</button>
+    </div>
+  </div>
+</article>

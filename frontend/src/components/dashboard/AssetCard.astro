@@ -6,10 +6,29 @@
  * Displays:
  *   1. Header: symbol, category, price, % change
  *   2. 7 Calculation Variables grid (PCR, IV, Delta, Gamma, Skew, GEX, Signal)
- *   3. Decision block with colored surface + BUY/SELL/CANCEL buttons
+ *   3. Technical Indicators — DYNAMICALLY rendered from backend config
+ *   4. Decision block: Options signal + multi-strategy stack + direction-aware TP/SL
  *
- * Receives asset object from Alpine.js x-for="a in filteredAssets"
+ * Indicators and strategy are fully data-driven:
+ *   - indicatorConfig.indicators[tf] provides the slot list for each timeframe
+ *   - asset.strategies[] provides multiple strategy decisions from backend
+ *   - TP/SL flips direction based on bearish context (isBearish)
+ *   - No hardcoded indicator/strategy rows — add to registry and it auto-appears
  */
+
+const TF_COLOR_CLASS: Record<string, string> = {
+  sky: "text-sky-500 dark:text-sky-400",
+  amber: "text-amber-500 dark:text-amber-400",
+  violet: "text-violet-500 dark:text-violet-400",
+  rose: "text-rose-500 dark:text-rose-400",
+};
+
+const TF_BG_CLASS: Record<string, string> = {
+  sky: "hover:bg-sky-500/5",
+  amber: "hover:bg-amber-500/5",
+  violet: "hover:bg-violet-500/5",
+  rose: "hover:bg-rose-500/5",
+};
 ---
 
 <article
@@ -55,21 +74,127 @@
     </template>
   </div>
 
+  <!-- ── Technical Indicators — Dynamic from Backend Config ── -->
+  <!-- indicatorConfig.indicators has one entry per timeframe (from GET /market/indicator-config) -->
+  <div
+    class="grid gap-0 divide-x divide-y divide-gray-100 dark:divide-surface-400 border-t border-gray-100 dark:border-surface-400"
+    :style="'grid-template-columns: repeat(' + (indicatorConfig?.grid_columns || 4) + ', minmax(0, 1fr))'"
+  >
+    <template x-for="tf in (indicatorConfig?.timeframes || [])" :key="tf.key">
+      <div class="px-3 py-2.5 flex flex-col gap-1" :class="TF_BG_CLASS[tf.color] || ''">
+        <p
+          class="text-[9px] uppercase tracking-[.15em] font-semibold"
+          :class="TF_COLOR_CLASS[tf.color] || 'text-gray-500'"
+          x-text="tf.label"
+        ></p>
+        <div class="flex flex-col gap-px">
+          <template x-for="slot in (indicatorConfig?.indicators?.[tf.key] || [])" :key="slot.key">
+            <div class="flex items-baseline justify-between gap-1">
+              <span
+                class="text-[9px] font-medium text-gray-400 dark:text-gray-500 w-20 shrink-0 truncate"
+                x-text="slot.label"
+              ></span>
+              <span
+                class="font-display tracking-tight leading-none shrink-0"
+                :class="[slot.bold ? 'font-bold' : 'font-semibold', slotClass(slot, a)]"
+                :style="'font-size:' + (slot.font_size || '11px')"
+                x-text="formatSlot(slot, a)"
+              ></span>
+            </div>
+          </template>
+        </div>
+      </div>
+    </template>
+
+    <!-- Fallback: if config not loaded yet -->
+    <template x-if="!indicatorConfig">
+      <div class="col-span-4 text-center py-4 text-[11px] text-gray-400 dark:text-gray-600">
+        Loading indicator config...
+      </div>
+    </template>
+  </div>
+
   <!-- ── Decision Block ── -->
   <div
-    class="decision-surface px-5 py-5 flex items-center justify-between gap-4 border-t-2"
+    class="decision-surface px-5 py-4 flex items-center justify-between gap-4 border-t-2"
     :class="decisionSurfaceClass(a.decision)"
   >
-    <!-- Left: Decision label -->
-    <div class="flex items-center gap-5 min-w-0">
+    <!-- Left: Dual Decision + TP/SL -->
+    <div class="flex items-center gap-4 min-w-0 flex-1">
       <div class="shrink-0">
-        <p class="text-[10px] uppercase tracking-[.15em] font-semibold opacity-50 mb-0.5">Decision</p>
+        <p class="text-[9px] uppercase tracking-[.15em] font-semibold opacity-50">Options</p>
+        <p
+          class="font-display font-bold text-[22px] tracking-tight leading-none truncate"
+          :class="a.decision === 'CONNECTING' ? 'connect-pulse' : ''"
+          x-text="a.decision"
+        ></p>
       </div>
-      <p
-        class="font-display font-bold text-[28px] tracking-tight leading-none truncate"
-        :class="a.decision === 'CONNECTING' ? 'connect-pulse' : ''"
-        x-text="a.decision"
-      ></p>
+
+      <!-- Separator -->
+      <div class="w-px h-10 bg-white/20 shrink-0"></div>
+
+      <!-- Strategy Decisions (from backend compute_strategies) -->
+      <div class="shrink-0 min-w-0">
+        <p class="text-[9px] uppercase tracking-[.15em] font-semibold opacity-50 mb-0.5">Strategies</p>
+        <template x-for="s in (a.strategies || [])" :key="s.key">
+          <div class="flex items-baseline gap-1.5 leading-tight">
+            <span class="text-[8px] opacity-40 shrink-0" x-text="s.display.label + ':'"></span>
+            <span
+              class="font-display font-bold text-[13px] tracking-tight truncate"
+              :class="strategyItemColorClass(s.color)"
+              x-text="s.label || '—'"
+            ></span>
+          </div>
+        </template>
+        <template x-if="!a.strategies || a.strategies.length === 0">
+          <span class="font-display font-bold text-[13px] text-white/30">—</span>
+        </template>
+      </div>
+
+      <!-- Separator -->
+      <div class="w-px h-10 bg-white/20 shrink-0"></div>
+
+      <!-- TP / SL from Options S/R (direction-aware: flips for bearish context) -->
+      <div class="flex flex-col gap-0.5 shrink-0">
+        <p class="text-[9px] uppercase tracking-[.15em] font-semibold opacity-50">S/R Levels</p>
+        <div class="flex items-center gap-2">
+          <div class="text-center">
+            <p class="text-[8px] opacity-40 leading-none mb-px">TP</p>
+            <p
+              class="font-display font-bold text-[13px] leading-none"
+              :class="isBearish(a) ? (a.vars.support ? '' : 'opacity-30') : (a.vars.resistance ? '' : 'opacity-30')"
+              x-text="isBearish(a) ? fmtVar('support', a.vars.support) : fmtVar('resistance', a.vars.resistance)"
+            ></p>
+          </div>
+          <span class="text-white/20 text-[10px]">/</span>
+          <div class="text-center">
+            <p class="text-[8px] opacity-40 leading-none mb-px">TP2</p>
+            <p
+              class="font-display font-semibold text-[11px] leading-none opacity-70"
+              :class="isBearish(a) ? (a.vars.support_secondary ? '' : 'opacity-30') : (a.vars.resistance_secondary ? '' : 'opacity-30')"
+              x-text="isBearish(a) ? fmtVar('support_secondary', a.vars.support_secondary) : fmtVar('resistance_secondary', a.vars.resistance_secondary)"
+            ></p>
+          </div>
+          <span class="text-white/20 text-[10px]">·</span>
+          <div class="text-center">
+            <p class="text-[8px] opacity-40 leading-none mb-px">SL</p>
+            <p
+              class="font-display font-bold text-[13px] leading-none"
+              :class="isBearish(a) ? (a.vars.resistance ? '' : 'opacity-30') : (a.vars.support ? '' : 'opacity-30')"
+              x-text="isBearish(a) ? fmtVar('resistance', a.vars.resistance) : fmtVar('support', a.vars.support)"
+            ></p>
+          </div>
+          <span class="text-white/20 text-[10px]">/</span>
+          <div class="text-center">
+            <p class="text-[8px] opacity-40 leading-none mb-px">SL2</p>
+            <p
+              class="font-display font-semibold text-[11px] leading-none opacity-70"
+              :class="isBearish(a) ? (a.vars.resistance_secondary ? '' : 'opacity-30') : (a.vars.support_secondary ? '' : 'opacity-30')"
+              x-text="isBearish(a) ? fmtVar('resistance_secondary', a.vars.resistance_secondary) : fmtVar('support_secondary', a.vars.support_secondary)"
+            ></p>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- Right: Action buttons -->

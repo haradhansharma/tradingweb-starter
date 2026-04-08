@@ -14,11 +14,11 @@ Fixes applied:
 
 import signal
 import asyncio
-import json
 import logging
 from django.core.management.base import BaseCommand
 
 from apps.common.binance_connector import BinanceOptionsConnector
+from apps.common.assets import get_assets_sync
 from django.conf import settings
 
 logger = logging.getLogger("binance.streamer")
@@ -38,8 +38,7 @@ class Command(BaseCommand):
             settings.CACHES["default"]["LOCATION"], decode_responses=True
         )
 
-        top_raw = r.get("binance:active_underlyings")
-        underlyings = json.loads(top_raw) if top_raw else ["BTCUSDT", "ETHUSDT"]
+        underlyings = get_assets_sync(r)
 
         self.stdout.write(
             self.style.SUCCESS(

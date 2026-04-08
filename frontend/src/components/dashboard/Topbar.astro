@@ -12,9 +12,27 @@
 <header
   class="fixed left-[228px] right-0 top-0 h-[52px] bg-surface-800 border-b border-surface-500 z-40 flex items-center justify-between px-5"
 >
-  <!-- ── Left: Title + Connection Status ── -->
+  <!-- ── Left: Title + Market Session + Connection Status ── -->
   <div class="flex items-center gap-3">
     <h1 class="font-display font-semibold text-white text-[15px]">Options Analysis</h1>
+
+    <!-- Market Session Indicator -->
+    <template x-if="marketSessions && sessionLabel">
+      <div
+        class="flex items-center gap-1.5 px-2 py-0.5 rounded-full"
+        :class="sessionBg"
+        :title="sessionLabel"
+      >
+        <div class="w-1.5 h-1.5 rounded-full" :class="sessionDotColor"></div>
+        <span
+          class="text-[10px] font-semibold tracking-wide"
+          :class="sessionColor"
+          x-text="sessionLabel"
+        ></span>
+      </div>
+    </template>
+
+    <!-- WebSocket Connection Status -->
     <div
       class="flex items-center gap-1.5 px-2 py-0.5 rounded-full"
       :class="connectionStatus === 'connected' ? 'bg-emerald-500/10' : connectionStatus === 'connecting' ? 'bg-sky-500/10' : 'bg-red-500/10'"

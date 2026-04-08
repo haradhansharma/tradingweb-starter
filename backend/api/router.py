@@ -5,6 +5,9 @@ from django.http import HttpResponse, JsonResponse
 import redis.asyncio as aioredis
 from django.conf import settings
 
+from apps.common.assets import get_assets_async
+from apps.common.indicator_engine import IndicatorEngine
+
 api = NinjaAPI(
     title="WebTrading Options Intelligence API",
     version="2.0.0",
@@ -51,11 +54,7 @@ async def health_check(request):
 @router.get("/active-underlyings")
 async def active_underlyings(request):
     r = get_redis_client()
-    raw = await r.get("binance:active_underlyings")
-    if raw:
-        candidates = json.loads(raw)
-    else:
-        candidates = ["BTCUSDT", "ETHUSDT"]
+    candidates = await get_assets_async(r)
 
     # Validate: only return assets with BOTH OI data AND mark price data.
     # Some underlyings (e.g. XRPUSDT, DOGEUSDT) may have stale OI from a
@@ -134,6 +133,21 @@ async def get_intelligence(request, underlying: str):
         }
 
     return HttpResponse(data, content_type="application/json")
+
+# =============================================================================
+# INDICATOR CONFIG ROUTER (Dynamic Rendering)
+# =============================================================================
+
+@router.get("/indicator-config")
+async def indicator_config(request):
+    """
+    Returns the full indicator display configuration for the frontend.
+    The frontend uses this to dynamically render all indicator rows
+    without any hardcoded HTML. Add a new indicator to INDICATOR_REGISTRY
+    in indicator_engine.py and it appears here automatically.
+    """
+    config = IndicatorEngine.get_display_config()
+    return config
 
 # Register the router under the /market prefix
 api.add_router("/market", router)

@@ -137,6 +137,7 @@ services:
         condition: service_healthy
       tbackend:           # Indented correctly now
         condition: service_started
+    restart: on-failure
     networks:
       - trading_net
 
@@ -213,9 +214,42 @@ services:
     restart: on-failure
     networks:
       - trading_net
+
+
+  # --------------------
+  # 9. FUTURES KLINE STREAMER (Dedicated Process — Independent)
+  # --------------------
+  # Separate container for futures kline data + technical indicators.
+  # Completely independent from the Options streamer — if this crashes,
+  # the 7-variable intelligence engine is unaffected.
+  # Seeds 500 historical 1m candles on startup, then maintains via WS.
+  t_futures_streamer:
+    build: ./backend
+    container_name: t_futures_streamer
+    command: python manage.py futures_streamer
+    volumes:
+      - ./backend:/app
+    env_file:
+      - .env
+    depends_on:
+      t_redis:
+        condition: service_healthy
+      t_db:
+        condition: service_healthy
+      tbackend:
+        condition: service_started
+    restart: on-failure
+    networks:
+      - trading_net
+
 networks:
   trading_net:
     driver: bridge
+
+
+
+
+      
 volumes:
   t_postgres_data:
   t_static_volume:

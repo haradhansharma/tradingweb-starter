@@ -218,9 +218,9 @@ class RedisBridge:
             now = time.time()
 
             def extract_with_timestamp(raw_json: bytes, category: str) -> tuple:
-                """Extract data and compute age in ms."""
+                """Extract data and compute age in ms. Returns None for unknown age."""
                 if not raw_json:
-                    return None, float("inf")
+                    return None, None
                 parsed = json.loads(raw_json)
                 data = (
                     parsed.get("data")
@@ -243,9 +243,9 @@ class RedisBridge:
 
             data_timestamps = {
                 "mark_price_age_ms": 0,  # mark_chunk is live
-                "index_age_ms": round(index_age, 0),
-                "open_interest_age_ms": round(oi_age, 0),
-                "trade_age_ms": round(trade_age, 0),
+                "index_age_ms": round(index_age, 0) if index_age is not None else None,
+                "open_interest_age_ms": round(oi_age, 0) if oi_age is not None else None,
+                "trade_age_ms": round(trade_age, 0) if trade_age is not None else None,
             }
 
             # --- Guard: skip if OI or index missing from cache ---
@@ -372,18 +372,20 @@ class RedisBridge:
             ),
         ]
 
-    def _estimate_data_age(self, data: Any, category: str, now: float) -> float:
+    def _estimate_data_age(self, data: Any, category: str, now: float) -> Optional[float]:
         """
         Estimate how old the cached data is in milliseconds.
         Tries to use event timestamps from the data itself.
+        Returns None when age cannot be determined (instead of float('inf')
+        which breaks PostgreSQL JSON serialization).
         """
         if not data or not isinstance(data, (dict, list)):
-            return float("inf")
+            return None
 
         # Get the first item to check for timestamps
         item = data[0] if isinstance(data, list) else data
         if not isinstance(item, dict):
-            return float("inf")
+            return None
 
         # Try Binance event timestamps: 'E' (WS) or 'timestamp' (REST OI)
         ts = item.get("E") or item.get("timestamp") or item.get("ts")
@@ -403,7 +405,7 @@ class RedisBridge:
             except (ValueError, TypeError):
                 pass
 
-        return float("inf")  # Unknown age
+        return None  # Unknown age — JSON-null instead of Infinity
 
     # ------------------------------------------------------------------
     # Error Broadcasting
@@ -451,8 +453,6 @@ class RedisBridge:
             logger.debug(
                 f"Cleaned {len(stale_keys)} stale entries from intel throttle cache"
             )
-
-
 
 
 # OLD DATA

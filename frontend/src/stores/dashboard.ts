@@ -1,4 +1,3 @@
-/** tradingweb/frontend/src/stores/dashboard.ts */
 /**
  * WebSocket Service for MarketPulse Dashboard
  * ==============================================
@@ -45,10 +44,11 @@ const HEARTBEAT_INTERVAL_MS = 15_000;
 const STALE_THRESHOLD_MS = 90_000;
 const FLASH_DURATION_MS = 600;
 
-// How long to wait after WS connects before removing assets still on CONNECTING.
-// This handles the race condition where the backend broadcasts intelligence
-// before the frontend subscribes, and Binance never sends more data for that asset.
-const CONNECTING_GRACE_PERIOD_MS = 15_000;
+// How long to wait after WS connects before logging a warning for assets
+// still on CONNECTING. We do NOT remove them — we keep WS subscriptions
+// alive so they auto-recover when data arrives. The only correct removal
+// signal is `insufficient_data` from the backend (genuinely no tradeable options).
+const CONNECTING_GRACE_PERIOD_MS = 30_000;
 
 const DEFAULT_UNDERLYINGS = ['BTCUSDT', 'ETHUSDT'] as const;
 
@@ -387,6 +387,14 @@ export interface AssetVars {
   nearest_expiry: number | null;
 }
 
+/**
+ * Technical indicators from futures kline pipeline.
+ * Key format: "{timeframe}_{indicator}_{param}" e.g. "1m_rsi_14", "1h_ema_9"
+ */
+export interface Indicators {
+  [key: string]: number | null;
+}
+
 export interface AssetState {
   symbol: string;
   category: string;
@@ -402,6 +410,20 @@ export interface AssetState {
   stale: string[];
   dataTimestamps: Record<string, string>;
   vars: AssetVars;
+  /** Technical indicators from futures kline pipeline (separate from intelligence) */
+  indicators: Indicators;
+  /** Strategy decisions from backend compute_strategies() — array of 2-3 strategies */
+  strategies: Array<{
+    key: string;
+    name: string;
+    label: string;
+    color: string;
+    bull_score: number;
+    bear_score: number;
+    rules_matched: string[];
+    display: { label: string; order: number };
+    timeframe: string | null;
+  }> | null;
   strikeAnalysis: Array<{
     strike: number;
     distance_pct: number;
@@ -422,6 +444,8 @@ export interface DashboardStore {
   activeUnderlyings: string[];
   darkMode: boolean;
   activeNav: string;
+  /** Indicator display config fetched from backend — drives dynamic rendering */
+  indicatorConfig: any;
   init(): Promise<void>;
   destroy(): void;
   selectAsset(symbol: string | null): void;
@@ -429,6 +453,14 @@ export interface DashboardStore {
   filteredAssets: AssetState[];
   fmtPrice(p: number, d: number): string;
   fmtVar(key: string, v: number | null): string;
+  /** Format indicator value using backend-provided slot config */
+  formatSlot(slot: any, asset: AssetState): string;
+  /** Get CSS class for an indicator slot based on value + color rules */
+  slotClass(slot: any, asset: AssetState): string;
+  /** Get strategy item color class from color string */
+  strategyItemColorClass(color: string): string;
+  /** Check if overall context is bearish (for TP/SL direction flip) */
+  isBearish(asset: AssetState): boolean;
   dotColor(d: string): string;
   decisionSurfaceClass(d: string): string;
   connectionLabel: string;
@@ -436,6 +468,28 @@ export interface DashboardStore {
   varLabels: Array<{ key: string; label: string }>;
   navItems: Array<{ id: string; label: string; icon: string; badge?: string }>;
   sysItems: Array<{ id: string; label: string; icon: string; badge?: string }>;
+  /** Market sessions data from backend — published every 30s */
+  marketSessions: {
+    sessions: Record<string, {
+      active: boolean;
+      label: string;
+      color: string;
+      weight: number;
+    }>;
+    active: string[];
+    label: string;
+    color: string;
+    utc_hour: number;
+    weight: number;
+  } | null;
+  /** Computed: primary session label for topbar display */
+  sessionLabel: string;
+  /** Computed: primary session color for topbar display */
+  sessionColor: string;
+  /** Computed: background pill color */
+  sessionBg: string;
+  /** Computed: dot color */
+  sessionDotColor: string;
 }
 
 // ── Internal Types (not exposed in public API) ──
@@ -456,12 +510,18 @@ interface NavItem {
 /** @internal Extends DashboardStore with private lifecycle methods */
 interface InternalDashboardStore extends DashboardStore {
   _fetchActiveUnderlyings(): Promise<void>;
+  _fetchIndicatorConfig(): Promise<void>;
   _setupWebSocket(): void;
   _updateAssetFromIntelligence(underlying: string, intel: any): void;
-  _removeAsset(underlying: string): void;
+  _removeAsset(underlying: string, reason?: string): void;
   _emptyAsset(symbol: string): AssetState;
+  _updateAssetFromIndicators(underlying: string, data: any): void;
   _startConnectingTimeout(): void;
   _stopConnectingTimeout(): void;
+  strategyItemColorClass(color: string): string;
+  isBearish(asset: AssetState): boolean;
+  sessionBg: string;
+  sessionDotColor: string;
 }
 
 
@@ -527,6 +587,8 @@ export function createDashboardStore(): DashboardStore {
     activeUnderlyings: [],
     darkMode: true,
     activeNav: 'dashboard',
+    marketSessions: null,
+    indicatorConfig: null,
 
     // ── Variable labels for the 7-column display ──
     varLabels: [
@@ -548,6 +610,7 @@ export function createDashboardStore(): DashboardStore {
 
     async init() {
       await this._fetchActiveUnderlyings();
+      await this._fetchIndicatorConfig();
       this._setupWebSocket();
     },
 
@@ -573,6 +636,22 @@ export function createDashboardStore(): DashboardStore {
       }
     },
 
+    async _fetchIndicatorConfig() {
+      /**
+       * Fetch indicator display config from backend.
+       * This drives the dynamic rendering of all indicator rows.
+       * Fetched once on init — adding a new indicator to the backend
+       * registry automatically updates the frontend on next page load.
+       */
+      try {
+        const resp = await fetch('/api/market/indicator-config');
+        if (!resp.ok) return;
+        this.indicatorConfig = await resp.json();
+      } catch (e) {
+        console.warn('[Dashboard] Failed to fetch indicator config:', e);
+      }
+    },
+
     _setupWebSocket() {
       const ws = marketWS;
       this.ws = ws;
@@ -593,6 +672,7 @@ export function createDashboardStore(): DashboardStore {
       this.activeUnderlyings.forEach((symbol: string) => {
         ws.subscribe(symbol, 'intelligence');
         ws.subscribe(symbol, 'index');
+        ws.subscribe(symbol, 'indicators');
       });
 
       // ── Intelligence data handler ──
@@ -641,6 +721,22 @@ export function createDashboardStore(): DashboardStore {
               }, FLASH_DURATION_MS);
             }
           }
+          // Auto-recovery: if asset was removed but index price arrives, re-create
+          if (!asset && this.activeUnderlyings.includes(symbol)) {
+            this.assets[symbol] = this._emptyAsset(symbol);
+            this.assets[symbol].price = price;
+            this.assets[symbol].basePrice = price;
+          }
+        }),
+      );
+
+      // ── Indicators handler (futures kline pipeline — independent) ──
+      wsUnsubscribers.push(
+        ws.on('data:indicators', (payload: any) => {
+          const underlying = payload.underlying;
+          const data = payload.data;
+          if (!data) return;
+          this._updateAssetFromIndicators(underlying, data);
         }),
       );
 
@@ -648,6 +744,15 @@ export function createDashboardStore(): DashboardStore {
       wsUnsubscribers.push(
         ws.on('error', (payload: any) => {
           console.warn('[Dashboard] Backend error:', payload.data?.message);
+        }),
+      );
+
+      // ── Market sessions handler (global — no per-symbol subscription) ──
+      wsUnsubscribers.push(
+        ws.on('data:sessions', (payload: any) => {
+          const data = payload.data;
+          if (!data) return;
+          this.marketSessions = data;
         }),
       );
 
@@ -662,15 +767,17 @@ export function createDashboardStore(): DashboardStore {
       this._stopConnectingTimeout();
       connectingTimer = setTimeout(() => {
         const staleAssets = Object.entries(this.assets)
-          .filter(([, a]) => a.decision === 'CONNECTING')
+          .filter(([, a]) => (a as AssetState).decision === 'CONNECTING')
           .map(([symbol]) => symbol);
 
         if (staleAssets.length > 0) {
           console.log(
-            `[Dashboard] ${staleAssets.length} asset(s) still on CONNECTING after ${CONNECTING_GRACE_PERIOD_MS / 1000}s — removing:`,
+            `[Dashboard] ${staleAssets.length} asset(s) still on CONNECTING after ${CONNECTING_GRACE_PERIOD_MS / 1000}s — keeping (will auto-recover when data arrives):`,
             staleAssets,
           );
-          staleAssets.forEach((symbol) => this._removeAsset(symbol));
+          // Do NOT remove assets. Keep WS subscriptions alive so they
+          // auto-recover when the backend sends intelligence/indicator data.
+          // Only `insufficient_data` from backend should trigger removal.
         }
 
         connectingTimer = null;
@@ -689,8 +796,20 @@ export function createDashboardStore(): DashboardStore {
     // ═══════════════════════════════════════
 
     _updateAssetFromIntelligence(underlying: string, intel: any) {
+      // Auto-recovery: if asset was removed but data arrives, re-create it
+      // and re-subscribe to WS channels.
       if (!this.assets[underlying]) {
         this.assets[underlying] = this._emptyAsset(underlying);
+        // Re-add to activeUnderlyings if it was removed
+        if (!this.activeUnderlyings.includes(underlying)) {
+          this.activeUnderlyings.push(underlying);
+        }
+        // Re-subscribe to WS channels if connection is live
+        if (this.ws && this.connectionStatus === 'connected') {
+          this.ws.subscribe(underlying, 'intelligence');
+          this.ws.subscribe(underlying, 'index');
+          this.ws.subscribe(underlying, 'indicators');
+        }
       }
 
       const asset = this.assets[underlying];
@@ -699,7 +818,7 @@ export function createDashboardStore(): DashboardStore {
       // This asset has no tradeable options on Binance, so it should not
       // appear in the dashboard at all.
       if (intel.status === 'insufficient_data') {
-        this._removeAsset(underlying);
+        this._removeAsset(underlying, 'insufficient_data from backend');
         return;
       }
 
@@ -746,7 +865,42 @@ export function createDashboardStore(): DashboardStore {
       asset.dataTimestamps = intel.data_timestamps || {};
     },
 
-    _removeAsset(underlying: string) {
+    _updateAssetFromIndicators(underlying: string, data: any): void {
+      // Auto-recovery: if asset was removed but indicator data arrives, re-create it
+      // and re-subscribe to WS channels.
+      if (!this.assets[underlying]) {
+        this.assets[underlying] = this._emptyAsset(underlying);
+        if (!this.activeUnderlyings.includes(underlying)) {
+          this.activeUnderlyings.push(underlying);
+        }
+        if (this.ws && this.connectionStatus === 'connected') {
+          this.ws.subscribe(underlying, 'intelligence');
+          this.ws.subscribe(underlying, 'index');
+          this.ws.subscribe(underlying, 'indicators');
+        }
+      }
+      const asset = this.assets[underlying];
+      // data is now { values: {...}, strategy: {...} }
+      if (data.values) {
+        asset.indicators = { ...data.values };
+      } else {
+        // Backward compat: if backend sends flat dict (old format)
+        asset.indicators = { ...data };
+      }
+      if (data.strategies) {
+        asset.strategies = data.strategies;
+      } else if (data.strategy) {
+        // Backward compat: single strategy → wrap in array
+        asset.strategies = [{
+          key: 'legacy', name: data.strategy.label, label: data.strategy.label,
+          color: data.strategy.color, bull_score: data.strategy.bull_score || 0,
+          bear_score: data.strategy.bear_score || 0, rules_matched: data.strategy.rules_matched || [],
+          display: { label: 'Strat', order: 0 }, timeframe: null,
+        }];
+      }
+    },
+
+    _removeAsset(underlying: string, reason?: string) {
       // Clean up flash timer if it exists
       const internal = this.assets[underlying] as InternalAssetState | undefined;
       if (internal && internal._flashTimer !== null) {
@@ -767,6 +921,7 @@ export function createDashboardStore(): DashboardStore {
       if (ws) {
         ws.unsubscribe(underlying, 'intelligence');
         ws.unsubscribe(underlying, 'index');
+        ws.unsubscribe(underlying, 'indicators');
       }
 
       // Clear selection if this was the selected asset
@@ -774,7 +929,7 @@ export function createDashboardStore(): DashboardStore {
         this.selectedAsset = null;
       }
 
-      console.log(`[Dashboard] Removed "${underlying}" — insufficient options data`);
+      console.log(`[Dashboard] Removed "${underlying}" — ${reason || 'insufficient options data'}`);
     },
 
     _emptyAsset(symbol: string): AssetState {
@@ -802,6 +957,8 @@ export function createDashboardStore(): DashboardStore {
           oi_concentration: null, nearest_expiry: null,
         },
         strikeAnalysis: [],
+        indicators: {},
+        strategies: null,
       };
       return state;
     },
@@ -811,7 +968,11 @@ export function createDashboardStore(): DashboardStore {
     // ═══════════════════════════════════════
 
     get assetList(): AssetState[] {
-      return Object.values(this.assets);
+      // Stable sort by activeUnderlyings order (from backend ranking by strike count).
+      // After auto-recovery, assets can jump to end of Record — this prevents drift.
+      return this.activeUnderlyings
+        .filter((sym: string) => this.assets[sym])
+        .map((sym: string) => this.assets[sym]);
     },
 
     get filteredAssets(): AssetState[] {
@@ -829,6 +990,48 @@ export function createDashboardStore(): DashboardStore {
       if (this.connectionStatus === 'connected') return 'text-emerald-400';
       if (this.connectionStatus === 'connecting') return 'text-sky-400';
       return 'text-red-400';
+    },
+
+    // ── Market Sessions (from backend — updated every 30s) ──
+
+    get sessionLabel(): string {
+      return this.marketSessions?.label || '';
+    },
+
+    get sessionColor(): string {
+      if (!this.marketSessions?.label) return 'text-gray-500';
+      const colorMap: Record<string, string> = {
+        'violet': 'text-violet-400',
+        'sky': 'text-sky-400',
+        'amber': 'text-amber-400',
+        'emerald': 'text-emerald-400',
+        'rose': 'text-rose-400',
+      };
+      return colorMap[this.marketSessions.color] || 'text-gray-400';
+    },
+
+    get sessionBg(): string {
+      if (!this.marketSessions?.label) return 'bg-gray-500/10';
+      const bgMap: Record<string, string> = {
+        'violet': 'bg-violet-500/10',
+        'sky': 'bg-sky-500/10',
+        'amber': 'bg-amber-500/10',
+        'emerald': 'bg-emerald-500/10',
+        'rose': 'bg-rose-500/10',
+      };
+      return bgMap[this.marketSessions.color] || 'bg-gray-500/10';
+    },
+
+    get sessionDotColor(): string {
+      if (!this.marketSessions?.label) return 'bg-gray-500';
+      const dotMap: Record<string, string> = {
+        'violet': 'bg-violet-400',
+        'sky': 'bg-sky-400',
+        'amber': 'bg-amber-400',
+        'emerald': 'bg-emerald-400',
+        'rose': 'bg-rose-400',
+      };
+      return dotMap[this.marketSessions.color] || 'bg-gray-400';
     },
 
     // ═══════════════════════════════════════
@@ -854,6 +1057,76 @@ export function createDashboardStore(): DashboardStore {
       if (v === null || v === undefined) return '—';
       const formatter = VAR_FORMATTERS[key];
       return formatter ? formatter(v) : String(v);
+    },
+
+    // ═══════════════════════════════════════
+    //  STRATEGY (from backend — no client-side calculation)
+    // ═══════════════════════════════════════
+
+    strategyItemColorClass(color: string): string {
+      const colorMap: Record<string, string> = {
+        'emerald': 'text-emerald-300',
+        'red': 'text-red-300',
+        'amber': 'text-amber-300',
+        'gray': 'text-white/60',
+      };
+      return colorMap[color] || 'text-white/30';
+    },
+
+    isBearish(asset: AssetState): boolean {
+      // TP/SL direction follows the OPTIONS signal only.
+      // Strategies are supplementary context — they should NOT override
+      // the primary direction decided by the options intelligence engine.
+      // A STRONG BUY with one LEAN BEAR strategy should still show
+      // TP above price / SL below price, not flipped.
+      return ['SELL', 'STRONG SELL'].includes(asset.decision);
+    },
+
+    // ═══════════════════════════════════════
+    //  DYNAMIC INDICATOR RENDERING HELPERS
+    // ═══════════════════════════════════════
+
+    /**
+     * Format an indicator value using its slot config from the backend.
+     * Handles all format types: decimal, price, signed, volume.
+     */
+    formatSlot(slot: any, asset: AssetState): string {
+      const val = asset.indicators[slot.key];
+      if (val === null || val === undefined || isNaN(val)) return '—';
+      const fmt: string = slot.format || 'decimal';
+      const dec: number = slot.decimals ?? 1;
+
+      if (fmt === 'price') {
+        return '$' + val.toLocaleString('en-US', { maximumFractionDigits: val > 1000 ? 0 : dec });
+      }
+      if (fmt === 'signed') {
+        return (val >= 0 ? '+' : '') + val.toFixed(dec);
+      }
+      if (fmt === 'volume') {
+        if (val >= 1_000_000) return (val / 1_000_000).toFixed(1) + 'M';
+        if (val >= 1_000) return (val / 1_000).toFixed(1) + 'K';
+        return val.toFixed(0);
+      }
+      // decimal (default)
+      return val.toFixed(dec);
+    },
+
+    /**
+     * Get the CSS class for an indicator slot based on its value and color_rules.
+     * First matching rule wins, otherwise returns default_class.
+     */
+    slotClass(slot: any, asset: AssetState): string {
+      const val = asset.indicators[slot.key];
+      if (val === null || val === undefined || isNaN(val)) return slot.default_class || 'text-gray-300 dark:text-gray-400';
+
+      const rules: Array<{op: string; value: number; class: string}> = slot.color_rules || [];
+      for (const rule of rules) {
+        if (rule.op === 'gt' && val > rule.value) return rule.class;
+        if (rule.op === 'lt' && val < rule.value) return rule.class;
+        if (rule.op === 'gte' && val >= rule.value) return rule.class;
+        if (rule.op === 'lte' && val <= rule.value) return rule.class;
+      }
+      return slot.default_class || 'text-gray-300 dark:text-gray-400';
     },
 
     // ═══════════════════════════════════════
@@ -895,6 +1168,7 @@ export function createDashboardStore(): DashboardStore {
         this.activeUnderlyings.forEach((s: string) => {
           ws.unsubscribe(s, 'intelligence');
           ws.unsubscribe(s, 'index');
+          ws.unsubscribe(s, 'indicators');
         });
         ws.disconnect();
         this.ws = null;
@@ -911,6 +1185,7 @@ if (typeof window !== 'undefined') {
     marketWS.disconnect();
   });
 }
+
 
 
 

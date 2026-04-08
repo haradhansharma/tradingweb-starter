@@ -35,6 +35,8 @@ kombu==5.6.2
 msgpack==1.1.2
 numpy==2.2.6
 packaging==26.0
+pandas==2.3.3
+pandas-ta-classic==0.4.47
 pillow==12.1.1
 prompt_toolkit==3.0.52
 psycopg2-binary==2.9.11
@@ -43,6 +45,7 @@ pydantic_core==2.41.5
 python-crontab==3.3.0
 python-dateutil==2.9.0.post0
 python-dotenv==1.2.2
+pytz==2026.1.post1
 PyYAML==6.0.3
 redis==7.3.0
 six==1.17.0

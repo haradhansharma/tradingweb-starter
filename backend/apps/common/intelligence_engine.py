@@ -166,7 +166,8 @@ class OptionIntelligenceEngine:
         stale = []
         if data_timestamps:
             for metric_key, age_ms in data_timestamps.items():
-                if age_ms > 300_000:  # 5 minutes
+                # None means age is unknown (data not yet available) — flag as stale
+                if age_ms is None or age_ms > 300_000:  # 5 minutes
                     stale.append(metric_key)
 
         # Asymmetric normalization: use direction-appropriate denominator
@@ -492,9 +493,13 @@ class OptionIntelligenceEngine:
         put_supports = [(s, o) for s, o in put_strikes if s <= spot]
         call_resistances = [(s, o) for s, o in call_strikes if s >= spot]
 
-        # Sort by OI descending
-        call_resistances.sort(key=lambda x: x[1], reverse=True)
-        put_supports.sort(key=lambda x: x[1], reverse=True)
+        # Sort by proximity to spot (nearest first).
+        # Resistance: ascending strike → lowest above spot first (nearest).
+        # Support: descending strike → highest below spot first (nearest).
+        # This ensures TP = nearest resistance, SL = nearest support,
+        # and TP2/SL2 are progressively farther from price.
+        call_resistances.sort(key=lambda x: x[0])
+        put_supports.sort(key=lambda x: x[0], reverse=True)
 
         return {
             "resistance": call_resistances[0][0] if call_resistances else 0,
@@ -953,3 +958,5 @@ class OptionIntelligenceEngine:
             return NUMPY_EMPTY_FALLBACK
         result = float(np.nanmean(arr))
         return result if np.isfinite(result) else NUMPY_EMPTY_FALLBACK
+
+

@@ -24,6 +24,7 @@ from django.conf import settings
 
 from .binance_rest import BinanceRESTClient, BinanceAPIError
 from .normalizers import normalize_oi_list, normalize_trade_list
+from .assets import get_assets_sync
 from .redis_bridge import (
     RedisBridge,
     CATEGORY_TICKER,
@@ -115,12 +116,7 @@ def sync_open_interest():
     rate_limits = _get_rate_limits()
 
     # --- 1. GET TOP ASSETS ---
-    active_raw = r_sync.get("binance:active_underlyings")
-    if not active_raw:
-        logger.warning("Active underlyings not found. Defaulting to BTC/ETH.")
-        top_assets = ["BTCUSDT", "ETHUSDT"]
-    else:
-        top_assets = json.loads(active_raw)
+    top_assets = get_assets_sync(r_sync)
 
     # --- 2. GET STRUCTURAL DATA ---
     ext_info_raw = r_sync.get("binance:exchange_info")
@@ -222,8 +218,7 @@ def sync_tickers_rest():
     client = BinanceRESTClient(testnet=False)
     r_sync = _get_sync_redis()
 
-    top_raw = r_sync.get("binance:active_underlyings")
-    top_assets = json.loads(top_raw) if top_raw else ["BTCUSDT", "ETHUSDT"]
+    top_assets = get_assets_sync(r_sync)
 
     try:
         data = asyncio.run(client.get_ticker())
@@ -265,8 +260,7 @@ def sync_recent_trades_rest():
     client = BinanceRESTClient(testnet=False)
     r_sync = _get_sync_redis()
 
-    top_raw = r_sync.get("binance:active_underlyings")
-    top_assets = json.loads(top_raw) if top_raw else ["BTCUSDT", "ETHUSDT"]
+    top_assets = get_assets_sync(r_sync)
 
     try:
         data = asyncio.run(client.get_block_trades())
@@ -300,6 +294,26 @@ def sync_recent_trades_rest():
         return f"Trade Sync Failed: {e}"
 
 
+def _sanitize_for_json(obj):
+    """
+    Recursively walk a data structure and replace non-JSON-safe numeric values.
+    PostgreSQL's JSON type rejects Infinity and NaN — these can originate from
+    numpy/pandas calculations (np.inf, np.nan) or sentinel values.
+    Returns a sanitized copy safe for json.dumps().
+    """
+    import math
+
+    if isinstance(obj, float):
+        if math.isinf(obj) or math.isnan(obj):
+            return None  # JSON null — PostgreSQL-safe
+        return obj
+    if isinstance(obj, dict):
+        return {k: _sanitize_for_json(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_sanitize_for_json(v) for v in obj]
+    return obj
+
+
 @shared_task(name="save_intelligence_snapshot")
 def save_intelligence_snapshot(asset: str, report_data: dict):
     """
@@ -310,6 +324,10 @@ def save_intelligence_snapshot(asset: str, report_data: dict):
     from .models import IntelligenceSnapshot
 
     try:
+        # Safety net: sanitize any Infinity/NaN from numpy calculations
+        # before PostgreSQL JSON serialization rejects them
+        report_data = _sanitize_for_json(report_data)
+
         metrics = report_data.get("metrics", {})
         IntelligenceSnapshot.objects.create(
             asset=asset,

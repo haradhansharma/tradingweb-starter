@@ -47,6 +47,11 @@ export default defineConfig({
     // Allows Docker to access the dev server
     host: '0.0.0.0',
     port: process.env.PORT ? parseInt(process.env.PORT) : 4321,
+    allowedHosts: [
+      'localhost',
+      'supranaturalistic-socorro-nonhypnotically.ngrok-free.dev'
+    ]
+
   },
 
 });

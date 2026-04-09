@@ -1,8 +1,8 @@
-# backend/apps/common/binance_connector.py
 """
-Binance Options WebSocket Connector
-====================================
-Connects to Binance Options WebSocket streams, routes events to RedisBridge.
+Options WebSocket Connector
+============================
+Connects to broker Options WebSocket streams, routes events to RedisBridge.
+Reads all WS URLs from broker_config.py — no hardcoded values.
 
 Fixes applied:
   - Async Redis only (no sync Redis in __init__)
@@ -16,9 +16,6 @@ import json
 import logging
 import websockets
 
-from django.conf import settings
-from datetime import datetime
-
 from .redis_bridge import (
     RedisBridge,
     CATEGORY_MARK_PRICE,
@@ -27,9 +24,9 @@ from .redis_bridge import (
     CATEGORY_OPEN_INTEREST,
     CATEGORY_INDEX,
 )
-from .binance_rest import BinanceRESTClient
+from .broker_config import get_broker_config, redis_global_key, DEFAULT_BROKER
 
-logger = logging.getLogger("binance.connector")
+logger = logging.getLogger("options.connector")
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -46,35 +43,48 @@ WS_CLOSE_TIMEOUT = 5  # seconds for close handshake
 WS_OPEN_TIMEOUT = 10  # seconds to wait for WebSocket handshake to complete
 
 
-class BinanceOptionsConnector:
-    def __init__(self, testnet: bool = True):
-        self.bridge = RedisBridge()
-        self.testnet = testnet
-        # NOTE: No sync Redis here. Exchange info is read async in start_market_streams().
+class OptionsConnector:
+    """
+    Broker-agnostic Options WebSocket connector.
+    All WS URLs are read from broker_config.py.
+    """
 
-        # WebSocket base URLs per Binance docs
+    def __init__(self, broker: str = DEFAULT_BROKER, testnet: bool = False):
+        self.bridge = RedisBridge(broker=broker)
+        self.broker = broker
+        self.testnet = testnet
+
+        # Read WS URLs from broker_config
+        config = get_broker_config(broker)
+        options = config["options"]
+
         if testnet:
-            self.ws_market_base = "wss://fstream.binancefuture.com/market"
-            self.ws_public_base = "wss://fstream.binancefuture.com/public"
+            self.ws_market_base = options.get(
+                "ws_market_base_testnet", options["ws_market_base"]
+            )
+            self.ws_public_base = options.get(
+                "ws_public_base_testnet", options["ws_public_base"]
+            )
         else:
-            self.ws_market_base = "wss://fstream.binance.com/market"
-            self.ws_public_base = "wss://fstream.binance.com/public"
+            self.ws_market_base = options["ws_market_base"]
+            self.ws_public_base = options["ws_public_base"]
 
     async def stop(self):
         """Gracefully close all underlying connections."""
-        logger.info("Stopping Binance Connector and closing Redis connections...")
+        logger.info(f"Stopping {self.broker.title()} Connector and closing Redis connections...")
         await self.bridge.close()
 
     async def _read_exchange_info_async(self) -> dict:
         """Read exchange info from Redis using async client (avoids blocking event loop)."""
         import redis.asyncio as aioredis
+        from django.conf import settings
 
         r = aioredis.from_url(
             settings.CACHES["default"]["LOCATION"],
             decode_responses=True,
         )
         try:
-            raw = await r.get("binance:exchange_info")
+            raw = await r.get(redis_global_key(self.broker, "exchange_info"))
             if raw:
                 return json.loads(raw)
             return {}
@@ -94,6 +104,8 @@ class BinanceOptionsConnector:
             for s in ext_info.get("optionSymbols", []):
                 u = s["underlying"]
                 if u in underlyings:
+                    from datetime import datetime
+
                     expiry_dt = datetime.fromtimestamp(s["expiryDate"] / 1000)
                     expiry_str = expiry_dt.strftime("%y%m%d")
                     if u not in asset_expiries:
@@ -136,7 +148,8 @@ class BinanceOptionsConnector:
         while True:
             try:
                 logger.info(
-                    f"Connecting to Binance {stream_type} stream (next retry in {delay:.1f}s if fails)..."
+                    f"Connecting to {self.broker.title()} {stream_type} stream "
+                    f"(next retry in {delay:.1f}s if fails)..."
                 )
                 async with websockets.connect(
                     uri,
@@ -145,7 +158,9 @@ class BinanceOptionsConnector:
                     close_timeout=WS_CLOSE_TIMEOUT,
                     open_timeout=WS_OPEN_TIMEOUT,
                 ) as ws:
-                    logger.info(f"SUCCESS: Connected to Binance {stream_type} stream.")
+                    logger.info(
+                        f"SUCCESS: Connected to {self.broker.title()} {stream_type} stream."
+                    )
                     delay = RECONNECT_BASE_DELAY  # Reset on successful connection
                     msg_count = 0
 
@@ -223,3 +238,7 @@ class BinanceOptionsConnector:
                 underlying = symbol.split("-")[0].upper() + "USDT"
 
             await self.bridge.broadcast(category, underlying, data, stream_name)
+
+
+# Backward-compatible aliases — existing code uses BinanceOptionsConnector
+BinanceOptionsConnector = OptionsConnector

@@ -1,5 +1,3 @@
-# backend/apps/common/normalizers.py
-
 """
 Data Normalization Layer
 ========================
@@ -36,17 +34,17 @@ logger = logging.getLogger("normalizers")
 # Canonical field names — single source of truth
 # ---------------------------------------------------------------------------
 CANONICAL_TRADE = {
-    "symbol": "s", 
-    "price": "p", 
-    "qty": "q", 
-    "side": "S", 
-    "trade_type": "X", 
+    "symbol": "s",
+    "price": "p",
+    "qty": "q",
+    "side": "S",
+    "trade_type": "X",
     "timestamp": "T"
 }
 CANONICAL_OI = {
-    "symbol": "s", 
-    "oi_contracts": "oi_contracts", 
-    "oi_usd": "oi_usd", 
+    "symbol": "s",
+    "oi_contracts": "oi_contracts",
+    "oi_usd": "oi_usd",
     "timestamp": "ts"
 }
 
@@ -121,7 +119,7 @@ def normalize_oi(raw: dict, source: str = "ws") -> dict:
         return None
 
 
-def normalize_oi_list(raw_list: list, source: str = "ws") -> list:
+def normalize_oi_list(raw_list: list, source: str = "ws", broker: str = None) -> list:
     """Normalize a list of OI dicts, filtering out failures."""
     results = []
     for item in raw_list:
@@ -131,7 +129,7 @@ def normalize_oi_list(raw_list: list, source: str = "ws") -> list:
     return results
 
 
-def normalize_trade_list(raw_list: list, source: str = "ws") -> list:
+def normalize_trade_list(raw_list: list, source: str = "ws", broker: str = None) -> list:
     """Normalize a list of trade dicts, filtering out failures."""
     results = []
     for item in raw_list:

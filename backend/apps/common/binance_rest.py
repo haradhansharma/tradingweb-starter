@@ -1,9 +1,9 @@
-# backend/apps/common/binance_rest.py
-
+# # backend/apps/common/binance_rest.py
 """
-Binance REST Client
+Options REST Client
 ===================
-Async HTTP client for Binance Options API (eapi).
+Async HTTP client for broker Options API.
+Reads all URLs, settings, and paths from broker_config.py — no hardcoded values.
 
 Includes:
   - HTTP status code checking (429, 418, 5xx → raise, don't return error JSON)
@@ -21,9 +21,14 @@ from urllib.parse import urlencode
 
 import httpx
 
-from django.conf import settings
+from .broker_config import (
+    get_broker_config,
+    get_broker_settings,
+    get_non_retryable_codes,
+    DEFAULT_BROKER,
+)
 
-logger = logging.getLogger("binance.rest")
+logger = logging.getLogger("options.rest")
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -32,38 +37,71 @@ HTTP_TIMEOUT = httpx.Timeout(10.0, connect=5.0)
 MAX_RETRIES = 2
 RETRY_BACKOFF_BASE = 1.0  # seconds, doubles each retry
 
-# Binance error codes that should NOT be retried
-NON_RETRYABLE_CODES = {418, 429}
 
+class OptionsAPIError(Exception):
+    """Raised when the broker Options API returns an error response."""
 
-class BinanceAPIError(Exception):
-    """Raised when Binance returns an error response."""
-
-    def __init__(self, status_code: int, data: Any):
+    def __init__(self, status_code: int, data: Any, broker: str = "unknown"):
         self.status_code = status_code
         self.data = data
+        self.broker = broker
         msg = data.get("msg", str(data)) if isinstance(data, dict) else str(data)
-        super().__init__(f"Binance API Error {status_code}: {msg}")
+        super().__init__(f"{broker.title()} Options API Error {status_code}: {msg}")
 
 
-class BinanceRESTClient:
+# Backward-compatible alias
+BinanceAPIError = OptionsAPIError
+
+
+class OptionsRESTClient:
+    """
+    Broker-agnostic Options REST client.
+    All URLs, API paths, and auth headers are read from broker_config.py.
+    """
+
     def __init__(
-        self, api_key: str = None, api_secret: str = None, testnet: bool = True
+        self,
+        broker: str = DEFAULT_BROKER,
+        testnet: bool = False,
+        api_key: str = None,
+        api_secret: str = None,
     ):
-        self.api_key = api_key or settings.BINANCE_API_KEY
-        self.api_secret = api_secret or settings.BINANCE_API_SECRET
-        self.base_url = (
-            "https://testnet.binancefuture.com"
-            if testnet
-            else "https://eapi.binance.com"
-        )
+        self.broker = broker
+        self.testnet = testnet
+
+        config = get_broker_config(broker)
+        options = config["options"]
+
+        # API credentials — explicit params override broker_config settings
+        broker_settings = get_broker_settings(broker)
+        self.api_key = api_key or broker_settings["api_key"]
+        self.api_secret = api_secret or broker_settings["api_secret"]
+        self.auth_header = broker_settings.get("auth_header", "X-MBX-APIKEY")
+
+        # Non-retryable HTTP codes from broker config
+        self._non_retryable = get_non_retryable_codes(broker)
+
+        # Base URL — testnet vs production
+        if testnet:
+            self.base_url = options.get("rest_base_url_testnet", options["rest_base_url"])
+        else:
+            self.base_url = options["rest_base_url"]
+
+        # API paths from config
+        self._paths = {
+            "exchange_info": options.get("exchange_info_path", "/eapi/v1/exchangeInfo"),
+            "open_interest": options.get("open_interest_path", "/eapi/v1/openInterest"),
+            "ticker": options.get("ticker_path", "/eapi/v1/ticker"),
+            "trades": options.get("trades_path", "/eapi/v1/trades"),
+            "block_trades": options.get("block_trades_path", "/eapi/v1/blockTrades"),
+            "account": options.get("account_path", "/eapi/v1/account"),
+        }
+
         # Explicit timeout + retry transport
         self.client = httpx.AsyncClient(
             base_url=self.base_url,
             timeout=HTTP_TIMEOUT,
-            transport=httpx.AsyncHTTPTransport(
-                retries=0
-            ),  # We handle retries ourselves
+            transport=httpx.AsyncHTTPTransport(retries=0),
         )
 
     async def close(self):
@@ -71,7 +109,7 @@ class BinanceRESTClient:
         await self.client.aclose()
 
     def _generate_signature(self, query_string: str) -> str:
-        """HMAC SHA256 signature per Binance docs."""
+        """HMAC SHA256 signature per broker docs."""
         return hmac.new(
             self.api_secret.encode("utf-8"),
             query_string.encode("utf-8"),
@@ -91,7 +129,7 @@ class BinanceRESTClient:
         """
         params = params or {}
         headers = {
-            "X-MBX-APIKEY": self.api_key,
+            self.auth_header: self.api_key,
             "Content-Type": "application/json",
             "Accept": "application/json",
         }
@@ -111,16 +149,20 @@ class BinanceRESTClient:
             raise
 
         # --- HTTP Status Checking ---
-        if response.status_code in NON_RETRYABLE_CODES:
+        if response.status_code in self._non_retryable:
             data = response.json()
-            logger.error(f"Binance non-retryable error {response.status_code}: {data}")
-            raise BinanceAPIError(response.status_code, data)
+            logger.error(
+                f"{self.broker.title()} non-retryable error "
+                f"{response.status_code}: {data}"
+            )
+            raise OptionsAPIError(response.status_code, data, self.broker)
 
         if response.status_code >= 500 and _retry_count < MAX_RETRIES:
             backoff = RETRY_BACKOFF_BASE * (2**_retry_count)
             logger.warning(
-                f"Binance 5xx {response.status_code} on {method} {path}. "
-                f"Retry {_retry_count + 1}/{MAX_RETRIES} in {backoff}s"
+                f"{self.broker.title()} 5xx {response.status_code} on "
+                f"{method} {path}. Retry {_retry_count + 1}/{MAX_RETRIES} "
+                f"in {backoff}s"
             )
             import asyncio
 
@@ -129,33 +171,35 @@ class BinanceRESTClient:
 
         if response.status_code >= 400:
             data = response.json()
-            logger.error(f"Binance client error {response.status_code}: {data}")
-            raise BinanceAPIError(response.status_code, data)
+            logger.error(
+                f"{self.broker.title()} client error {response.status_code}: {data}"
+            )
+            raise OptionsAPIError(response.status_code, data, self.broker)
 
         return response.json()
 
     # ------------------------------------------------------------------
-    # Public Endpoints (data fetching — unchanged signatures)
+    # Public Endpoints (data fetching)
     # ------------------------------------------------------------------
 
     async def get_exchange_info(self):
-        return await self._request("GET", "/eapi/v1/exchangeInfo")
+        return await self._request("GET", self._paths["exchange_info"])
 
     async def get_open_interest(self, underlying: str, expiration: str):
         return await self._request(
             "GET",
-            "/eapi/v1/openInterest",
+            self._paths["open_interest"],
             params={"underlyingAsset": underlying, "expiration": expiration},
         )
 
     async def get_ticker(self, symbol: str = None):
         params = {"symbol": symbol} if symbol else {}
-        return await self._request("GET", "/eapi/v1/ticker", params=params)
+        return await self._request("GET", self._paths["ticker"], params=params)
 
     async def get_recent_trades(self, symbol: str, limit: int = 100):
         return await self._request(
             "GET",
-            "/eapi/v1/trades",
+            self._paths["trades"],
             params={"symbol": symbol, "limit": limit},
         )
 
@@ -163,7 +207,181 @@ class BinanceRESTClient:
         params = {"limit": limit}
         if symbol:
             params["symbol"] = symbol
-        return await self._request("GET", "/eapi/v1/blockTrades", params=params)
+        return await self._request("GET", self._paths["block_trades"], params=params)
 
     async def get_account_info(self):
-        return await self._request("GET", "/eapi/v1/account", signed=True)
+        return await self._request("GET", self._paths["account"], signed=True)
+
+
+# Backward-compatible alias — existing code uses BinanceRESTClient
+BinanceRESTClient = OptionsRESTClient
+
+
+
+# """
+# Binance REST Client
+# ===================
+# Async HTTP client for Binance Options API (eapi).
+
+# Includes:
+#   - HTTP status code checking (429, 418, 5xx → raise, don't return error JSON)
+#   - Explicit timeout configuration
+#   - Automatic retry with exponential backoff for transient errors
+#   - HMAC SHA256 signature for authenticated endpoints
+# """
+
+# import time
+# import hmac
+# import hashlib
+# import logging
+# from typing import Optional, Dict, Any
+# from urllib.parse import urlencode
+
+# import httpx
+
+# from django.conf import settings
+
+# logger = logging.getLogger("binance.rest")
+
+# # ---------------------------------------------------------------------------
+# # Constants
+# # ---------------------------------------------------------------------------
+# HTTP_TIMEOUT = httpx.Timeout(10.0, connect=5.0)
+# MAX_RETRIES = 2
+# RETRY_BACKOFF_BASE = 1.0  # seconds, doubles each retry
+
+# # Binance error codes that should NOT be retried
+# NON_RETRYABLE_CODES = {418, 429}
+
+
+# class BinanceAPIError(Exception):
+#     """Raised when Binance returns an error response."""
+
+#     def __init__(self, status_code: int, data: Any):
+#         self.status_code = status_code
+#         self.data = data
+#         msg = data.get("msg", str(data)) if isinstance(data, dict) else str(data)
+#         super().__init__(f"Binance API Error {status_code}: {msg}")
+
+
+# class BinanceRESTClient:
+#     def __init__(
+#         self, api_key: str = None, api_secret: str = None, testnet: bool = True
+#     ):
+#         self.api_key = api_key or settings.BINANCE_API_KEY
+#         self.api_secret = api_secret or settings.BINANCE_API_SECRET
+#         self.base_url = (
+#             "https://testnet.binancefuture.com"
+#             if testnet
+#             else "https://eapi.binance.com"
+#         )
+#         # Explicit timeout + retry transport
+#         self.client = httpx.AsyncClient(
+#             base_url=self.base_url,
+#             timeout=HTTP_TIMEOUT,
+#             transport=httpx.AsyncHTTPTransport(
+#                 retries=0
+#             ),  # We handle retries ourselves
+#         )
+
+#     async def close(self):
+#         """Close the HTTP client."""
+#         await self.client.aclose()
+
+#     def _generate_signature(self, query_string: str) -> str:
+#         """HMAC SHA256 signature per Binance docs."""
+#         return hmac.new(
+#             self.api_secret.encode("utf-8"),
+#             query_string.encode("utf-8"),
+#             hashlib.sha256,
+#         ).hexdigest()
+
+#     async def _request(
+#         self,
+#         method: str,
+#         path: str,
+#         signed: bool = False,
+#         params: Optional[Dict] = None,
+#         _retry_count: int = 0,
+#     ) -> Any:
+#         """
+#         Internal request wrapper with error handling and retry logic.
+#         """
+#         params = params or {}
+#         headers = {
+#             "X-MBX-APIKEY": self.api_key,
+#             "Content-Type": "application/json",
+#             "Accept": "application/json",
+#         }
+
+#         if signed:
+#             params["timestamp"] = int(time.time() * 1000)
+#             params["recvWindow"] = 5000
+#             query_string = urlencode(params)
+#             params["signature"] = self._generate_signature(query_string)
+
+#         try:
+#             response = await self.client.request(
+#                 method, path, params=params, headers=headers
+#             )
+#         except httpx.TimeoutException as e:
+#             logger.error(f"Timeout on {method} {path}: {e}")
+#             raise
+
+#         # --- HTTP Status Checking ---
+#         if response.status_code in NON_RETRYABLE_CODES:
+#             data = response.json()
+#             logger.error(f"Binance non-retryable error {response.status_code}: {data}")
+#             raise BinanceAPIError(response.status_code, data)
+
+#         if response.status_code >= 500 and _retry_count < MAX_RETRIES:
+#             backoff = RETRY_BACKOFF_BASE * (2**_retry_count)
+#             logger.warning(
+#                 f"Binance 5xx {response.status_code} on {method} {path}. "
+#                 f"Retry {_retry_count + 1}/{MAX_RETRIES} in {backoff}s"
+#             )
+#             import asyncio
+
+#             await asyncio.sleep(backoff)
+#             return await self._request(method, path, signed, params, _retry_count + 1)
+
+#         if response.status_code >= 400:
+#             data = response.json()
+#             logger.error(f"Binance client error {response.status_code}: {data}")
+#             raise BinanceAPIError(response.status_code, data)
+
+#         return response.json()
+
+#     # ------------------------------------------------------------------
+#     # Public Endpoints (data fetching — unchanged signatures)
+#     # ------------------------------------------------------------------
+
+#     async def get_exchange_info(self):
+#         return await self._request("GET", "/eapi/v1/exchangeInfo")
+
+#     async def get_open_interest(self, underlying: str, expiration: str):
+#         return await self._request(
+#             "GET",
+#             "/eapi/v1/openInterest",
+#             params={"underlyingAsset": underlying, "expiration": expiration},
+#         )
+
+#     async def get_ticker(self, symbol: str = None):
+#         params = {"symbol": symbol} if symbol else {}
+#         return await self._request("GET", "/eapi/v1/ticker", params=params)
+
+#     async def get_recent_trades(self, symbol: str, limit: int = 100):
+#         return await self._request(
+#             "GET",
+#             "/eapi/v1/trades",
+#             params={"symbol": symbol, "limit": limit},
+#         )
+
+#     async def get_block_trades(self, symbol: str = None, limit: int = 50):
+#         params = {"limit": limit}
+#         if symbol:
+#             params["symbol"] = symbol
+#         return await self._request("GET", "/eapi/v1/blockTrades", params=params)
+
+#     async def get_account_info(self):
+#         return await self._request("GET", "/eapi/v1/account", signed=True)

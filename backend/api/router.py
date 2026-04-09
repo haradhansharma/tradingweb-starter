@@ -1,13 +1,26 @@
-# backend/api/router.py
-from ninja import NinjaAPI, Router
+"""
+Market Data Router
+==================
+All market-related endpoints. Public access (no auth required).
+Uses the shared api instance from api/__init__.py.
+"""
+from ninja import NinjaAPI, Router, Query
 import json
 from django.http import HttpResponse, JsonResponse
+from typing import Optional
 import redis.asyncio as aioredis
 from django.conf import settings
 
 from apps.common.assets import get_assets_async
 from apps.common.indicator_engine import IndicatorEngine
+from apps.common.broker_config import (
+    redis_key,
+    redis_global_key,
+    DEFAULT_BROKER,
+    get_available_brokers,
+)
 
+# Import the shared API instance (NinjaAPI)
 api = NinjaAPI(
     title="WebTrading Options Intelligence API",
     version="2.0.0",
@@ -52,9 +65,9 @@ async def health_check(request):
 # =============================================================================
 
 @router.get("/active-underlyings")
-async def active_underlyings(request):
+async def active_underlyings(request, broker: str = Query(DEFAULT_BROKER)):
     r = get_redis_client()
-    candidates = await get_assets_async(r)
+    candidates = await get_assets_async(r, broker=broker)
 
     # Validate: only return assets with BOTH OI data AND mark price data.
     # Some underlyings (e.g. XRPUSDT, DOGEUSDT) may have stale OI from a
@@ -63,8 +76,8 @@ async def active_underlyings(request):
     # active assets reach the frontend.
     # On first run (before sync completes), fall back to all candidates.
     if candidates:
-        oi_keys = [f"binance:{asset}:open_interest" for asset in candidates]
-        mp_keys = [f"binance:{asset}:markPrice" for asset in candidates]
+        oi_keys = [redis_key(broker, asset, "open_interest") for asset in candidates]
+        mp_keys = [redis_key(broker, asset, "markPrice") for asset in candidates]
         oi_values = await r.mget(oi_keys)
         mp_values = await r.mget(mp_keys)
         validated = [
@@ -82,13 +95,13 @@ async def active_underlyings(request):
 
 
 @router.get("/live/{underlying}/{category}")
-async def get_live_data(request, underlying: str, category: str):
+async def get_live_data(request, underlying: str, category: str, broker: str = Query(DEFAULT_BROKER)):
     """
     High-speed pipe for MarkPrice, Ticker, Index, and Trade.
     Bypasses JSON parsing to serve data in sub-milliseconds.
     """
     r = get_redis_client()
-    key = f"binance:{underlying.upper()}:{category}"
+    key = redis_key(broker, underlying.upper(), category)
 
     # Fetch the raw string from Redis
     data = await r.get(key)
@@ -100,10 +113,10 @@ async def get_live_data(request, underlying: str, category: str):
     return HttpResponse(data, content_type="application/json")
 
 @router.get("/open-interest/{underlying}")
-async def get_oi(request, underlying: str, expiration: str = None):
+async def get_oi(request, underlying: str, expiration: str = None, broker: str = Query(DEFAULT_BROKER)):
     """Fetches Open Interest from Cache."""
     r = get_redis_client()
-    key = f"binance:{underlying.upper()}:open_interest"
+    key = redis_key(broker, underlying.upper(), "open_interest")
     if expiration:
         key += f":{expiration}"
 
@@ -118,13 +131,13 @@ async def get_oi(request, underlying: str, expiration: str = None):
 # =============================================================================
 
 @router.get("/intelligence/{underlying}")
-async def get_intelligence(request, underlying: str):
+async def get_intelligence(request, underlying: str, broker: str = Query(DEFAULT_BROKER)):
     """
     Returns the pre-calculated 7-Variable Intelligence Report.
     This is the core of your '7-Variable Framework'.
     """
     r = get_redis_client()
-    data = await r.get(f"binance:{underlying.upper()}:intelligence")
+    data = await r.get(redis_key(broker, underlying.upper(), "intelligence"))
 
     if not data:
         return {
@@ -151,3 +164,20 @@ async def indicator_config(request):
 
 # Register the router under the /market prefix
 api.add_router("/market", router)
+
+# =============================================================================
+# BROKER ROUTER
+# =============================================================================
+
+broker_router = Router()
+
+
+@broker_router.get("/list")
+async def list_brokers(request):
+    """Return available brokers for the frontend selector."""
+    return {"brokers": get_available_brokers()}
+
+
+api.add_router("/brokers", broker_router)
+
+

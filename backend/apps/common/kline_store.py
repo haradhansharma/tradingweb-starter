@@ -171,15 +171,17 @@ class KlineStore:
     Uses async Redis for non-blocking operations.
     """
 
-    def __init__(self, cache_client, pubsub_client=None):
+    def __init__(self, cache_client, pubsub_client=None, broker: str = "binance"):
         """
         Parameters
         ----------
         cache_client : redis.asyncio.Redis    — DB0 connection for cache
         pubsub_client : redis.asyncio.Redis   — DB3 connection for pub/sub (optional)
+        broker : str                           — Broker name for Redis key prefix
         """
         self.cache = cache_client
         self.pubsub = pubsub_client
+        self.broker = broker
 
     # ------------------------------------------------------------------
     # Seed Historical Data (from REST)

@@ -1,4 +1,3 @@
-# backend/apps/common/tasks.py
 """
 Celery Tasks for Binance Options Data Sync
 ===========================================
@@ -30,6 +29,11 @@ from .redis_bridge import (
     CATEGORY_TICKER,
     CATEGORY_TRADE,
     CATEGORY_OPEN_INTEREST,
+)
+from .broker_config import (
+    redis_key,
+    redis_global_key,
+    DEFAULT_BROKER,
 )
 
 logger = logging.getLogger("celery.tasks")
@@ -63,7 +67,7 @@ def sync_exchange_structure():
             return "No optionSymbols found in exchange info."
 
         # Cache the full blueprint
-        r_sync.set("binance:exchange_info", json.dumps(data), ex=3600)
+        r_sync.set(redis_global_key(DEFAULT_BROKER, "exchange_info"), json.dumps(data), ex=3600)
 
         # Rank assets by number of active strikes (liquidity proxy)
         asset_counts = {}
@@ -72,12 +76,12 @@ def sync_exchange_structure():
             asset_counts[u] = asset_counts.get(u, 0) + 1
 
         top_assets = sorted(asset_counts, key=asset_counts.get, reverse=True)[:20]
-        r_sync.set("binance:active_underlyings", json.dumps(top_assets))
+        r_sync.set(redis_global_key(DEFAULT_BROKER, "active_underlyings"), json.dumps(top_assets))
         logger.info(f"Top 20 Assets Identified: {top_assets}")
 
         # Notify system via bridge — with PROPER cleanup
         async def notify():
-            bridge = RedisBridge()
+            bridge = RedisBridge(broker=DEFAULT_BROKER)
             try:
                 await bridge.broadcast(
                     "meta",
@@ -119,7 +123,7 @@ def sync_open_interest():
     top_assets = get_assets_sync(r_sync)
 
     # --- 2. GET STRUCTURAL DATA ---
-    ext_info_raw = r_sync.get("binance:exchange_info")
+    ext_info_raw = r_sync.get(redis_global_key(DEFAULT_BROKER, "exchange_info"))
     if not ext_info_raw:
         return "No Exchange Info found in cache."
     ext_info = json.loads(ext_info_raw)
@@ -157,8 +161,8 @@ def sync_open_interest():
 
                     if isinstance(data, list) and len(data) > 0:
                         # NORMALIZE before caching
-                        normalized = normalize_oi_list(data, source="rest")
-                        key_exp = f"binance:{asset}:{CATEGORY_OPEN_INTEREST}:{exp}"
+                        normalized = normalize_oi_list(data, source="rest", broker=DEFAULT_BROKER)
+                        key_exp = redis_key(DEFAULT_BROKER, asset, f"{CATEGORY_OPEN_INTEREST}:{exp}")
                         # Wrap in payload structure consistent with bridge broadcast
                         payload = {
                             "category": CATEGORY_OPEN_INTEREST,
@@ -191,7 +195,7 @@ def sync_open_interest():
                 continue
             # exp format: "YYMMDD" — string sort matches chronological order
             nearest_exp, nearest_data = min(exp_list, key=lambda x: x[0])
-            key_latest = f"binance:{asset}:{CATEGORY_OPEN_INTEREST}"
+            key_latest = redis_key(DEFAULT_BROKER, asset, CATEGORY_OPEN_INTEREST)
             promotion_tasks.append(
                 r_async.set(key_latest, nearest_data, ex=1800)
             )
@@ -238,7 +242,7 @@ def sync_tickers_rest():
                     "data": tickers,
                 }
                 r_sync.set(
-                    f"binance:{asset}:{CATEGORY_TICKER}", json.dumps(payload), ex=60
+                    redis_key(DEFAULT_BROKER, asset, CATEGORY_TICKER), json.dumps(payload), ex=60
                 )
 
         return f"Tickers synced for {len(top_assets)} assets"
@@ -274,14 +278,14 @@ def sync_recent_trades_rest():
 
             for asset, trades in grouped.items():
                 # NORMALIZE REST trade data to canonical schema
-                normalized = normalize_trade_list(trades, source="rest")
+                normalized = normalize_trade_list(trades, source="rest", broker=DEFAULT_BROKER)
                 payload = {
                     "category": CATEGORY_TRADE,
                     "underlying": asset,
                     "data": normalized,
                 }
                 r_sync.set(
-                    f"binance:{asset}:{CATEGORY_TRADE}", json.dumps(payload), ex=3600
+                    redis_key(DEFAULT_BROKER, asset, CATEGORY_TRADE), json.dumps(payload), ex=3600
                 )
 
         return f"Trades seeded for {len(grouped)} assets (normalized)"

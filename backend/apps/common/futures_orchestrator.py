@@ -29,6 +29,12 @@ from .futures_connector import FuturesConnector
 from .kline_store import KlineStore, DEFAULT_AGGREGATE_TFS
 from .indicator_engine import IndicatorEngine
 from .market_sessions import compute_sessions
+from .broker_config import (
+    redis_key,
+    ws_group_name,
+    ws_global_group,
+    DEFAULT_BROKER,
+)
 
 logger = logging.getLogger("futures.orchestrator")
 
@@ -53,14 +59,15 @@ class FuturesOrchestrator:
     Start with run() and stop with stop().
     """
 
-    def __init__(self):
-        self.connector = FuturesConnector()
+    def __init__(self, broker: str = DEFAULT_BROKER):
+        self.connector = FuturesConnector(broker=broker)
         self.store: Optional[KlineStore] = None
         self.engine = IndicatorEngine()
         self.cache: Optional[aioredis.Redis] = None
         self.pubsub: Optional[aioredis.Redis] = None
         self.channel_layer = None
         self.symbols: list = []
+        self.broker = broker
         self._running = False
         self._session_task: Optional[asyncio.Task] = None
 
@@ -73,7 +80,7 @@ class FuturesOrchestrator:
             settings.REDIS_PUBSUB_URL, decode_responses=True
         )
         self.channel_layer = get_channel_layer()
-        self.store = KlineStore(self.cache, self.pubsub)
+        self.store = KlineStore(self.cache, self.pubsub, broker=self.broker)
 
     async def close(self):
         """Release all connections."""
@@ -147,7 +154,7 @@ class FuturesOrchestrator:
         This ensures every registered indicator has sufficient data
         from the very first calculation — no warm-up period needed.
         """
-        client = FuturesRESTClient()
+        client = FuturesRESTClient(broker=self.broker)
         try:
             for sym in self.symbols:
                 try:
@@ -208,7 +215,7 @@ class FuturesOrchestrator:
         frontends receive it without per-symbol subscriptions.
         """
         CATEGORY_SESSIONS = "sessions"
-        GROUP_SESSIONS = f"_global_{CATEGORY_SESSIONS}"
+        GROUP_SESSIONS = ws_global_group(self.broker, CATEGORY_SESSIONS)
 
         while self._running:
             try:
@@ -299,10 +306,13 @@ class FuturesOrchestrator:
             return
 
         # --- Cache indicator VALUES only in Redis Hash (backward compatible) ---
-        indicator_key = f"indicators:{symbol}"
+        indicator_key = redis_key(self.broker, symbol, "indicators")
+        strategies_key = redis_key(self.broker, symbol, "indicators:strategies")
         pipe = self.cache.pipeline()
         pipe.hset(indicator_key, mapping={k: str(v) for k, v in values.items() if v is not None})
         pipe.expire(indicator_key, 300)  # 5 min TTL
+        # Also cache strategies so consumer can serve them on subscribe
+        pipe.set(strategies_key, json.dumps(strategies), ex=300)
         await pipe.execute()
 
         # --- Build WS payload (values + strategies) ---
@@ -319,10 +329,11 @@ class FuturesOrchestrator:
                 payload = {
                     "category": CATEGORY_INDICATORS,
                     "underlying": symbol,
+                    "broker": self.broker,
                     "data": ws_data,
                 }
                 await self.pubsub.publish(
-                    f"indicators:{symbol}",
+                    redis_key(self.broker, symbol, "indicators"),
                     json.dumps(payload)
                 )
             except Exception as e:
@@ -331,10 +342,11 @@ class FuturesOrchestrator:
         # --- Broadcast via Django Channels (DB2) → Frontend WS ---
         if self.channel_layer:
             try:
-                group_name = f"{symbol}_{CATEGORY_INDICATORS}"
+                group_name = ws_group_name(self.broker, symbol, CATEGORY_INDICATORS)
                 payload = {
                     "category": CATEGORY_INDICATORS,
                     "underlying": symbol,
+                    "broker": self.broker,
                     "data": ws_data,
                 }
                 await self.channel_layer.group_send(
@@ -360,12 +372,13 @@ class FuturesOrchestrator:
         """Get current indicator values for REST API responses."""
         if not self.cache:
             return {}
-        indicator_key = f"indicators:{symbol}"
+        indicator_key = redis_key(self.broker, symbol, "indicators")
         raw = await self.cache.hgetall(indicator_key)
         if not raw:
             return {}
         # Convert string values back to float
         return {k: float(v) for k, v in raw.items() if v is not None}
+
 
 
 
@@ -386,6 +399,7 @@ class FuturesOrchestrator:
 #   DB2 (Channels): "BTCUSDT_indicators" group → frontend WS
 # """
 
+# import asyncio
 # import json
 # import logging
 # from typing import Dict, Optional
@@ -398,6 +412,7 @@ class FuturesOrchestrator:
 # from .futures_connector import FuturesConnector
 # from .kline_store import KlineStore, DEFAULT_AGGREGATE_TFS
 # from .indicator_engine import IndicatorEngine
+# from .market_sessions import compute_sessions
 
 # logger = logging.getLogger("futures.orchestrator")
 
@@ -431,6 +446,7 @@ class FuturesOrchestrator:
 #         self.channel_layer = None
 #         self.symbols: list = []
 #         self._running = False
+#         self._session_task: Optional[asyncio.Task] = None
 
 #     async def _init_connections(self):
 #         """Initialize Redis and Channel connections."""
@@ -482,15 +498,22 @@ class FuturesOrchestrator:
 #         for sym in symbols:
 #             await self._recalculate_indicators(sym)
 
-#         # Step 3: Start WS stream (blocking — runs forever)
+#         # Step 3: Start market session publisher (background)
+#         self._session_task = asyncio.create_task(self._session_loop())
+
+#         # Step 4: Start WS stream (blocking — runs forever)
 #         try:
 #             await self.connector.start(symbols)
 #         finally:
+#             if self._session_task:
+#                 self._session_task.cancel()
 #             await self.close()
 
 #     async def stop(self):
-#         """Stop the WS connector."""
+#         """Stop the WS connector and session publisher."""
 #         self._running = False
+#         if self._session_task:
+#             self._session_task.cancel()
 #         await self.connector.stop()
 
 #     # ------------------------------------------------------------------
@@ -557,6 +580,71 @@ class FuturesOrchestrator:
 
 #         # Recalculate indicators for this symbol
 #         await self._recalculate_indicators(symbol)
+
+#     # ------------------------------------------------------------------
+#     # Market Session Publisher
+#     # ------------------------------------------------------------------
+
+#     async def _session_loop(self):
+#         """
+#         Background task: publish market session state every 30 seconds.
+#         Uses a global Channels group 'market_sessions' so all connected
+#         frontends receive it without per-symbol subscriptions.
+#         """
+#         CATEGORY_SESSIONS = "sessions"
+#         GROUP_SESSIONS = f"_global_{CATEGORY_SESSIONS}"
+
+#         while self._running:
+#             try:
+#                 session_data = compute_sessions()
+#                 payload = {
+#                     "category": CATEGORY_SESSIONS,
+#                     "underlying": "_global",
+#                     "data": session_data,
+#                 }
+
+#                 # Publish via Channels (DB2) → frontend WS
+#                 if self.channel_layer:
+#                     try:
+#                         await self.channel_layer.group_send(
+#                             GROUP_SESSIONS,
+#                             {"type": "market.update", "payload": payload},
+#                         )
+#                     except Exception as e:
+#                         logger.debug(f"Session channel broadcast failed: {e}")
+
+#                 # Also publish via Pub/Sub (DB3) for other backend consumers
+#                 if self.pubsub:
+#                     try:
+#                         await self.pubsub.publish(
+#                             f"sessions:global",
+#                             json.dumps(payload)
+#                         )
+#                     except Exception as e:
+#                         logger.debug(f"Session pub/sub publish failed: {e}")
+
+#                 # Cache session state in DB0 for backend strategy/decision reads.
+#                 # Key: "sessions:global" with 120s TTL (auto-refreshed every 30s).
+#                 # Any backend process can do: await cache.get("sessions:global")
+#                 if self.cache:
+#                     try:
+#                         await self.cache.set(
+#                             "sessions:global",
+#                             json.dumps(session_data),
+#                             ex=120,
+#                         )
+#                     except Exception as e:
+#                         logger.debug(f"Session cache write failed: {e}")
+
+#             except asyncio.CancelledError:
+#                 raise
+#             except Exception as e:
+#                 logger.error(f"Session publisher error: {e}")
+
+#             try:
+#                 await asyncio.sleep(30)
+#             except asyncio.CancelledError:
+#                 raise
 
 #     # ------------------------------------------------------------------
 #     # Indicator Calculation + Publishing
@@ -662,4 +750,5 @@ class FuturesOrchestrator:
 #             return {}
 #         # Convert string values back to float
 #         return {k: float(v) for k, v in raw.items() if v is not None}
+
 

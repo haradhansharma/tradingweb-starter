@@ -1,4 +1,3 @@
-# backend/apps/common/management/futures_streamer.py
 """
 Futures Streamer — Management Command
 =======================================

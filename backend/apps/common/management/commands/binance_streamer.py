@@ -1,4 +1,3 @@
-# backend/apps/common/management/commands/binance_streamer.py
 """
 Binance Streamer — Management Command
 ======================================
@@ -17,11 +16,12 @@ import asyncio
 import logging
 from django.core.management.base import BaseCommand
 
-from apps.common.binance_connector import BinanceOptionsConnector
+from apps.common.binance_connector import OptionsConnector
 from apps.common.assets import get_assets_sync
+from apps.common.broker_config import DEFAULT_BROKER
 from django.conf import settings
 
-logger = logging.getLogger("binance.streamer")
+logger = logging.getLogger("options.streamer")
 
 # How long to wait for tasks to clean up after cancellation before force-closing
 SHUTDOWN_TIMEOUT_SEC = 5
@@ -47,7 +47,7 @@ class Command(BaseCommand):
         )
 
         # 2. Create connector
-        connector = BinanceOptionsConnector(testnet=False)
+        connector = OptionsConnector(broker=DEFAULT_BROKER)
 
         # 3. Create event loop
         loop = asyncio.new_event_loop()

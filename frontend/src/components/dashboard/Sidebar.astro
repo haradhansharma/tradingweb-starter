@@ -29,6 +29,24 @@
 
   <!-- ── Navigation Sections ── -->
   <nav class="flex-1 py-4 px-2.5 space-y-0.5 overflow-y-auto dash-scroll">
+
+    <!-- ── Broker Selector (button row) ── -->
+    <div class="px-3 mb-2">
+      <p class="text-[10px] uppercase tracking-[.12em] text-gray-500 font-semibold mb-1.5">Broker</p>
+      <div class="flex gap-1.5">
+        <template x-for="b in availableBrokers" :key="b.id">
+          <button
+            @click="switchBroker(b.id)"
+            :class="b.id === activeBroker
+              ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-400'
+              : 'bg-surface-700 border-surface-500 text-gray-400 hover:border-surface-400 hover:text-gray-300'"
+            class="flex-1 text-[11px] font-medium border rounded-lg px-2.5 py-1.5 transition-all text-center truncate"
+            x-text="b.display_name"
+          ></button>
+        </template>
+      </div>
+    </div>
+
     <!-- Overview section -->
     <p class="px-3 mb-2 text-[10px] uppercase tracking-[.12em] text-gray-500 font-semibold">Overview</p>
     <template x-for="item in navItems" :key="item.id">

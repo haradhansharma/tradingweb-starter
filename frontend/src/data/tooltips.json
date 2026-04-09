@@ -1,0 +1,185 @@
+{
+  "variables": {
+    "pcr": {
+      "title": "Put-Call Ratio (PCR)",
+      "calculation": "PCR = Total Put Open Interest / Total Call Open Interest. Computed using aggregate OI across all active option strikes for the nearest expiry, weighted by distance from current price.",
+      "impact": "PCR > 1.0 signals excessive bearish positioning — often a contrarian bullish indicator (market makers are net short puts, must hedge by buying the underlying). PCR < 0.7 signals extreme bullish call buying — can indicate overleveraged longs vulnerable to a squeeze. The dashboard uses PCR extremes to score directional conviction."
+    },
+    "avg_iv": {
+      "title": "IV Rank",
+      "calculation": "IV Rank = (Current IV - 52-Week Low IV) / (52-Week High IV - 52-Week Low IV) × 100%. IV (Implied Volatility) is derived from the ATM (at-the-money) straddle price of the nearest expiry using the Black-Scholes model. The 52-week high/low range provides the normalization baseline.",
+      "impact": "IV Rank tells you whether options are currently cheap or expensive relative to their own history. High IV Rank (>50%) means elevated uncertainty — good for selling premium (credit spreads). Low IV Rank (<25%) means options are cheap — favorable for buying premium (debit spreads). Extreme IV Rank (>80%) often precedes explosive moves. The signal engine uses IV Rank as a volatility regime filter."
+    },
+    "delta": {
+      "title": "Net Delta Exposure",
+      "calculation": "Net Delta = Σ(Call OI × Call Delta) − Σ(Put OI × |Put Delta|) across all strikes. Call Delta is positive (0 to 1), Put Delta is negative (0 to -1). The aggregate tells you whether market makers are net long or net short the underlying from their options book.",
+      "impact": "Positive Net Delta means dealers are net long the underlying — they benefit from price going up, creating a 'floor' of buying support. Negative Net Delta means dealers are hedged short — price declines trigger more selling (delta hedging). Large positive delta (>25th percentile) contributes to a bullish score. The signal engine treats extreme delta imbalances as high-conviction directional signals."
+    },
+    "gamma": {
+      "title": "Net Gamma Exposure",
+      "calculation": "Net Gamma = Σ(Call OI × Call Gamma) − Σ(Put OI × |Put Gamma|). Gamma measures how fast Delta changes per $1 move in the underlying. It is highest for ATM options near expiry. The sign reveals whether dealers must buy or sell into price moves to stay hedged.",
+      "impact": "Positive Net Gamma (call-heavy positioning) creates a 'magnet' effect — dealers buy dips and sell rips, compressing volatility. This is the 'squeezy' regime where mean-reversion strategies thrive. Negative Net Gamma (put-heavy positioning) creates a 'volatile' regime — dealers sell into rallies and buy into drops, amplifying moves. This is where breakout and momentum strategies outperform. The signal engine weighs gamma heavily in its regime detection."
+    },
+    "skew": {
+      "title": "Volatility Skew",
+      "calculation": "Skew = IV of 25-Delta Put − IV of 25-Delta Call, expressed in percentage points. It measures the premium investors are willing to pay for downside protection versus upside speculation. Also called 'risk reversal skew'.",
+      "impact": "Positive Skew (puts cost more than calls) indicates fear — investors hedging downside risk, typically bullish contrarian signal when extreme. Negative Skew (calls cost more than puts) indicates greed/complacency — often precedes corrections. The signal engine uses skew extremes (>1 standard deviation from 30-day mean) to detect sentiment shifts and potential reversals."
+    },
+    "total_gex": {
+      "title": "Gamma Exposure (GEX)",
+      "calculation": "Total GEX = Σ(Strike Gamma × Strike OI × Underlying Price × 0.01) across all strikes. This dollar-denominated metric represents the notional value of gamma that market makers must delta-hedge per 1% move. The sign and magnitude determine market microstructure dynamics.",
+      "impact": "GEX is the real-time 'liquidity map'. When GEX is positive and large, market makers are 'long gamma' — they stabilize price by buying dips and selling rips (vol suppressor). When GEX flips negative, they become 'short gamma' — forced to sell into drops and buy into rallies (vol accelerator). The 'GEX zero' level acts as a magnetic attractor or repeller. The signal engine uses GEX sign + magnitude as a primary regime classifier."
+    },
+    "signal": {
+      "title": "Composite Options Signal",
+      "calculation": "Signal is a weighted composite score derived from: PCR z-score (20%), IV Rank percentile (15%), Net Delta z-score (20%), Net Gamma z-score (20%), Skew z-score (10%), GEX sign & magnitude (15%). Each component is normalized to a z-score using 30-day rolling statistics, then blended. The final score maps to one of 7 decision labels.",
+      "impact": "STRONG BUY / BUY = multiple options metrics aligned bullishly — high conviction long setup. LEAN BUY = moderate bullish tilt but some conflicting signals — cautiously bullish. NEUTRAL = metrics are mixed or within normal range — no edge from options flow alone. LEAN SELL / SELL / STRONG SELL = the inverse bearish spectrum. The signal is the PRIMARY decision driver for the dashboard's color-coded recommendation."
+    }
+  },
+
+  "decisions": {
+    "STRONG BUY": {
+      "title": "STRONG BUY",
+      "description": "Multiple options metrics are strongly aligned in the bullish direction. PCR is elevated (contrarian), Delta and Gamma are net positive, GEX is supportive, and Skew favors upside. This is the highest conviction signal from the options intelligence engine.",
+      "action": "Consider aggressive long positioning — outright longs, call debit spreads, or bull call spreads. Use the TP as primary target and SL as hard stop. Position size can be above normal due to high conviction. Monitor for signal degradation to LEAN BUY or lower."
+    },
+    "BUY": {
+      "title": "BUY",
+      "description": "Options metrics show a clear bullish bias with moderate conviction. Most components are positive but not at extreme levels. There is directional edge but some residual uncertainty.",
+      "action": "Take long positions with standard sizing. Call debit spreads or simple longs work well. TP/SL levels are well-defined from the options wall. Consider reducing size slightly vs STRONG BUY. Watch for any metric flipping bearish."
+    },
+    "LEAN BUY": {
+      "title": "LEAN BUY",
+      "description": "The options data has a slight bullish tilt but conviction is low. Some metrics may be neutral or mildly conflicting. There is a directional lean but it is not strong enough for aggressive positioning.",
+      "action": "Use reduced position sizes or wait for confirmation. Consider long entries only with tight stops. This is a 'watch and cautiously participate' signal. Can be used as a filter — only take bullish setups that align with your other analysis."
+    },
+    "NEUTRAL": {
+      "title": "NEUTRAL",
+      "description": "Options metrics are mixed with no clear directional edge. PCR, Delta, Gamma, GEX, and Skew are within their normal ranges. The options market is not providing a strong signal in either direction.",
+      "action": "Avoid directional trades. Consider range-bound strategies like iron condors or credit spreads if IV Rank is elevated. If IV is low, this can be a good environment to buy straddles ahead of expected volatility expansion. Do not force directional trades on a NEUTRAL signal."
+    },
+    "LEAN SELL": {
+      "title": "LEAN SELL",
+      "description": "The options data shows a mild bearish tilt but conviction is weak. Some bearish metrics are present but not extreme enough for a full sell signal. There is a directional lean to the downside but with uncertainty.",
+      "action": "Use reduced position sizes for short trades. Put debit spreads or limited-risk bearish setups. Tight stops are essential as conviction is low. Can be used as a filter — avoid bullish setups when signal is LEAN SELL."
+    },
+    "SELL": {
+      "title": "SELL",
+      "description": "Options metrics show a clear bearish bias. PCR is low (excessive call buying), Delta and/or Gamma are net negative, GEX may be negative (short gamma regime), and Skew indicates complacency. Moderate-to-high bearish conviction.",
+      "action": "Take short positions with standard sizing. Put debit spreads, bear call spreads, or outright shorts. TP (resistance becomes SL in bearish, support becomes TP) and SL levels are clearly defined. Monitor for signal strengthening to STRONG SELL."
+    },
+    "STRONG SELL": {
+      "title": "STRONG SELL",
+      "description": "Multiple options metrics are strongly aligned bearish. Market makers may be short gamma, PCR is extremely low, Delta is heavily negative. This is the highest conviction bearish signal from the options intelligence engine.",
+      "action": "Consider aggressive short positioning — outright shorts, put debit spreads, or bear put spreads. Use clearly defined TP and SL from the options wall. Position size can be above normal due to high bearish conviction. Watch for capitulation signals (extreme put buying) that could mark bottoms."
+    },
+    "CONNECTING": {
+      "title": "CONNECTING",
+      "description": "The dashboard is establishing a WebSocket connection to the real-time data feed. Options intelligence data has not been received yet for this asset. This is a transient state during initial load or reconnection.",
+      "action": "Wait for data to populate. All metrics, signals, and levels will appear once the connection is established and the first intelligence update is received. This typically takes 1-3 seconds."
+    }
+  },
+
+  "strategies": {
+    "_generic": {
+      "title": "Strategy Signals",
+      "description": "Strategy signals are computed independently from the options intelligence engine. They use technical indicators (kline-based: EMA crossovers, RSI, MACD, ATR, Bollinger Bands, etc.) to generate directional judgments. Each strategy outputs a label (BULLISH/BEARISH/NEUTRAL) and a confidence color. These provide supplementary context to the primary Options Signal.",
+      "impact": "Strategies are supplementary — they do NOT override the Options Signal decision. A STRONG BUY with one LEAN BEAR strategy is still bullish. However, alignment between strategies and the Options Signal increases overall conviction. Use strategy signals to fine-tune entry timing and manage risk."
+    },
+    "session_breakout": {
+      "title": "Session Breakout Strategy (SBS)",
+      "calculation": "SBS identifies the first 15-minute Initial Balance (IB) range of each trading session (Asian, European, US). It then tracks price relative to the IB range and calculates breakout targets. CME Gap (Globex close − prior day regular close) is factored in. Breakout confirmation requires a candle close beyond the IB range with volume confirmation.",
+      "impact": "Breakouts above IB High target the CME Gap fill or progressive extension levels (TP1, TP2). Breakouts below IB Low target support levels. The session label (AS/EU/US) tells you which session's IB is active. Minutes-into-session shows time elapsed — early breakouts have higher probability. Use SBS TP/SL as supplementary levels alongside the Options Wall S/R."
+    }
+  },
+
+  "sbs": {
+    "session_label": {
+      "title": "Trading Session",
+      "description": "Identifies which market session the SBS is tracking. AS = Asian Session (Tokyo/Sydney open), EU = European Session (London open), US = US Session (New York open). Each session has its own Initial Balance range and breakout characteristics."
+    },
+    "ib_range": {
+      "title": "Initial Balance Range",
+      "calculation": "The High-Low range of the first 15-minute candle of the session. Captured automatically when each session opens. This range represents the session's opening auction equilibrium between buyers and sellers.",
+      "impact": "The IB range is the SBS reference frame. Price staying inside the IB indicates consolidation — wait for breakout. The width of the IB range also matters: a narrow IB (< 0.3% of price) suggests a larger move is building. A wide IB (> 1% of price) suggests the move may already be exhausted."
+    },
+    "cme_gap": {
+      "title": "CME Gap",
+      "calculation": "CME Gap = Current Session Open − Prior Regular Session Close. For crypto (24/7 markets), this is the price difference between the current session's first candle open and the previous session's last regular-hours candle close. Expressed in dollar terms with sign.",
+      "impact": "Gaps tend to act as magnets — 60-70% of CME gaps get filled within the same session. A positive gap (gap up) acts as support below; a negative gap (gap down) acts as resistance above. The SBS uses unfilled gap direction as a directional bias filter. When gap aligns with breakout direction, confidence increases significantly."
+    },
+    "phase": {
+      "title": "SBS Phase",
+      "description": "The current phase of the Session Breakout Strategy: 'forming' = IB range is still being established (first 15 min), 'active' = IB is set, monitoring for breakout, 'breakout_up' = confirmed upside breakout, 'breakout_down' = confirmed downside breakout, 'no_session' = outside of tracked trading sessions."
+    },
+    "tp1": {
+      "title": "SBS Target 1 (TP1)",
+      "calculation": "TP1 = IB High + (IB Range × 1.0) for upside breakout, or IB Low − (IB Range × 1.0) for downside breakout. Represents the first logical profit target based on the opening range extension.",
+      "impact": "TP1 is the conservative target — roughly 65% of breakouts reach TP1. Use this for partial profit-taking or as the primary target for smaller positions. It provides a favorable risk-reward ratio relative to the stop loss."
+    },
+    "tp2": {
+      "title": "SBS Target 2 (TP2)",
+      "calculation": "TP2 = IB High + (IB Range × 2.0) for upside breakout, or IB Low − (IB Range × 2.0) for downside breakout. An extended target for strong momentum breakouts.",
+      "impact": "Only about 30-35% of breakouts reach TP2. Use for the remaining portion of your position after securing profits at TP1. Often aligned with the Options Wall resistance/support levels — confluence between SBS TP2 and Options Wall increases probability."
+    },
+    "sl_sbs": {
+      "title": "SBS Stop Loss",
+      "calculation": "SL = Opposite side of IB range. For upside breakout: SL = IB Low − (IB Range × 0.25). For downside breakout: SL = IB High + (IB Range × 0.25). Slightly beyond the IB range to avoid false breakouts.",
+      "impact": "The SBS SL defines invalidation of the breakout thesis. A return below (or above for short) the stop loss means the breakout has failed. This is typically a tight stop — risk is small relative to TP1 reward (often 2:1 to 3:1 R:R). Combine with Options Wall SL for a more robust stop level."
+    },
+    "minutes_into_session": {
+      "title": "Minutes Into Session",
+      "description": "Time elapsed since the session opened. Early breakouts (within 30-60 minutes of session open) have statistically higher probability of reaching targets. Late breakouts (past 2 hours) are less reliable and often represent false signals."
+    }
+  },
+
+  "sr_levels": {
+    "_header": {
+      "title": "Support & Resistance Levels (Options Wall)",
+      "description": "S/R levels are derived from the 'Options Wall' — the strike prices with the highest Open Interest concentration. These are NOT traditional technical S/R levels. They represent price levels where market makers have the largest hedging obligations. When price approaches these levels, gamma hedging flows can create significant support (calls with high OI below price) or resistance (puts/calls with high OI above price). These walls tend to be 'sticky' — price slows down, consolidates, or reverses at these levels.",
+      "impact": "The Options Wall is one of the most powerful concepts in options-based trading. High-OI call strikes BELOW current price act as a MAGNET (support) — dealers buy the underlying to stay delta-hedged as price drops toward those strikes. High-OI put strikes BELOW price act as a FLOOR (support) — at expiry, price tends to pin near max-pain. High-OI strikes ABOVE price act as a CEILING (resistance) — dealers sell into rallies. Use these levels for entry, targets, and stops with higher confidence than traditional technical levels."
+    },
+    "tp": {
+      "title": "Primary Target (TP)",
+      "description": "The nearest high Open Interest resistance level ABOVE current price (for bullish signals) or the nearest high OI support level BELOW current price (for bearish signals). This is the primary Options Wall level where price is expected to face significant hedging flow resistance/support.",
+      "impact": "TP is your first take-profit level. In bullish mode, this is the nearest call wall above price — dealers will resist further upside through their hedging activity. Partial profit-taking at TP is recommended. The probability of a pause or reversal at this level is statistically significant due to options dealer hedging flows."
+    },
+    "sl": {
+      "title": "Primary Stop Loss (SL)",
+      "description": "The nearest high Open Interest support level BELOW current price (for bullish signals) or the nearest high OI resistance level ABOVE current price (for bearish signals). This is the Options Wall level where price would find support/resistance, defining where your trade thesis is invalidated.",
+      "impact": "SL is your hard stop-loss level. In bullish mode, this is the nearest put wall below price — it represents a level where dealer buying support exists. If price breaks below this level, the bullish thesis is invalidated. Place your stop just below (for longs) or above (for shorts) this level with a small buffer to avoid wicks."
+    },
+    "tp2": {
+      "title": "Secondary Target (TP2)",
+      "description": "The second high Open Interest resistance/support level beyond the primary target. This is the next Options Wall beyond TP — representing a more aggressive profit target. Confluence with SBS TP2 or other technical levels increases probability.",
+      "impact": "TP2 is for the runner portion of your position. It represents a larger move that requires sustained momentum to reach. Only a minority of trades will reach TP2 — use it for trailing stops or for letting winners run. When TP2 aligns with SBS TP2, the confluence significantly increases the probability."
+    },
+    "sl2": {
+      "title": "Secondary Stop Loss (SL2)",
+      "description": "The second Options Wall level beyond the primary stop loss. This provides a deeper invalidation level. If price reaches SL2, the market structure has fundamentally shifted — the options positioning that supported your thesis has been overrun.",
+      "impact": "SL2 is the absolute maximum loss level. For trailing stop strategies, consider moving your stop from SL to breakeven after price reaches TP, then to SL2 as the market moves further. Reaching SL2 signals that market makers' hedging flows have overwhelmed your directional thesis — exit immediately."
+    }
+  },
+
+  "sessions": {
+    "AS": {
+      "title": "Asian Session",
+      "description": "Asian Session (approximately 00:00–08:00 UTC). Includes Tokyo, Sydney, Hong Kong, and Singapore markets. Crypto trades 24/7 but volume and volatility patterns still follow these session windows. Asian session tends to have lower volatility and tighter ranges."
+    },
+    "EU": {
+      "title": "European Session",
+      "description": "European Session (approximately 07:00–16:00 UTC). London is the largest forex and options hub globally. Crypto volume spikes during EU open. Session Breakout Strategy tracks the EU IB range from the first 15 minutes of this session."
+    },
+    "US": {
+      "title": "US Session",
+      "description": "US Session (approximately 12:00–21:00 UTC). New York brings the highest options volume and volatility. Major economic releases, Fed announcements, and institutional flow peaks during US hours. The US session often determines the daily trend direction. CME futures gaps are measured relative to US regular session close."
+    }
+  },
+
+  "ui": {
+    "bearish_flip": {
+      "title": "Bearish Direction Flip",
+      "description": "When the Options Signal is SELL or STRONG SELL, the S/R levels flip direction: TP shows support levels (targets for shorts) and SL shows resistance levels (stops for shorts). This ensures the levels always reflect your actual trade direction — TP is where you take profit, SL is where you exit at a loss."
+    }
+  }
+}

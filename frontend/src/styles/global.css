@@ -351,3 +351,59 @@
 @utility live-dot {
   animation: pulse-live 2s ease-in-out infinite;
 }
+
+/* ══════════════════════════════════════════
+   TOOLTIP SYSTEM
+   ══════════════════════════════════════════ */
+
+@utility tip-trigger {
+  position: relative;
+  cursor: help;
+}
+
+@utility tip-panel {
+  position: absolute;
+  z-index: 50;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: 320px;
+  min-width: 220px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  transform: translateX(-50%) translateY(4px);
+}
+
+@utility tip-panel-visible {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(-50%) translateY(0);
+}
+
+@utility tip-panel-right {
+  left: 0;
+  transform: translateX(0);
+}
+
+@utility tip-panel-right-visible {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(0) translateY(0);
+}
+
+/* Tooltip arrow */
+@utility tip-arrow {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 8px;
+  height: 8px;
+  overflow: hidden;
+}
+
+@utility tip-arrow-right {
+  left: 20px;
+}

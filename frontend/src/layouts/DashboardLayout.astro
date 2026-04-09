@@ -41,11 +41,6 @@ const { title = 'MarketPulse — Options Analysis' } = Astro.props;
 
     <!-- Alpine.js + Store: loaded as ES module via script tag -->
     <script>
-      declare global {
-        interface Window {
-          Alpine: any;
-        }
-      }
       // Import store inline so Alpine.js can access it via window
       import { createDashboardStore } from '../stores/dashboard.ts';
 
@@ -55,7 +50,7 @@ const { title = 'MarketPulse — Options Analysis' } = Astro.props;
       // Expose to Alpine.js as global data function
       document.addEventListener('alpine:init', () => {
         // Merge store properties into Alpine's root data
-        Alpine.data('dashboard', () => store);
+        (window as any).Alpine.data('dashboard', () => store);
       });
 
       // Initialize WebSocket connections after Alpine mounts
@@ -82,5 +77,61 @@ const { title = 'MarketPulse — Options Analysis' } = Astro.props;
     >
       <slot />
     </main>
+
+    <!-- ═══════════════════════════════════════════════════════
+         GLOBAL TOOLTIP PANEL
+         Lives at body level — survives all Alpine re-renders.
+         Positioning is computed from the hovered element's
+         getBoundingClientRect(), stored in tip.posX / tip.posY.
+         ═══════════════════════════════════════════════════════ -->
+    <div
+      x-show="tip.visible && tip.data"
+      x-transition:enter="transition ease-out duration-150"
+      x-transition:enter-start="opacity-0 scale-95"
+      x-transition:enter-end="opacity-100 scale-100"
+      x-transition:leave="transition ease-in duration-100"
+      x-transition:leave-start="opacity-100 scale-100"
+      x-transition:leave-end="opacity-0 scale-95"
+      x-cloak
+      class="fixed z-[9999] pointer-events-none"
+      :style="tip.dir === 'below'
+        ? 'left:' + tip.posX + 'px; top:' + tip.posY + 'px; transform: translate(-50%, 8px);'
+        : 'left:' + tip.posX + 'px; top:' + tip.posY + 'px; transform: translate(-50%, -100%) translateY(-8px);'"
+      @mouseenter="if(_tipHideTimer){clearTimeout(_tipHideTimer);_tipHideTimer=null;}"
+      @mouseleave="hideTooltip()"
+    >
+      <div class="bg-gray-900 dark:bg-gray-800 rounded-lg shadow-2xl border border-gray-700/60 px-4 py-3 w-[300px] max-w-[85vw] pointer-events-auto">
+        <p class="text-[11px] font-bold text-white mb-1.5 tracking-wide" x-text="tip.title"></p>
+
+        <!-- Calculation section -->
+        <template x-if="tip.data?.calculation">
+          <div class="mb-2">
+            <p class="text-[9px] uppercase tracking-[.15em] font-semibold text-sky-400 mb-0.5">Calculation</p>
+            <p class="text-[10px] text-gray-300 leading-relaxed" x-text="tip.data.calculation"></p>
+          </div>
+        </template>
+
+        <!-- Description section -->
+        <template x-if="tip.data?.description">
+          <p class="text-[10px] text-gray-300 leading-relaxed mb-2" x-text="tip.data.description"></p>
+        </template>
+
+        <!-- Impact section -->
+        <template x-if="tip.data?.impact">
+          <div class="mb-2">
+            <p class="text-[9px] uppercase tracking-[.15em] font-semibold text-amber-400 mb-0.5">Impact</p>
+            <p class="text-[10px] text-gray-300 leading-relaxed" x-text="tip.data.impact"></p>
+          </div>
+        </template>
+
+        <!-- Action section -->
+        <template x-if="tip.data?.action">
+          <div>
+            <p class="text-[9px] uppercase tracking-[.15em] font-semibold text-emerald-400 mb-0.5">Action</p>
+            <p class="text-[10px] text-gray-300 leading-relaxed" x-text="tip.data.action"></p>
+          </div>
+        </template>
+      </div>
+    </div>
   </body>
 </html>

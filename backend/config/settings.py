@@ -41,6 +41,8 @@ INSTALLED_APPS = [
     "django_celery_results",
     "django_celery_beat",
     "users",
+    'ninja_extra',
+    'ninja_jwt',
     "common",
 ]
 
@@ -302,8 +304,10 @@ LOGGING = {
 
 AUTH_USER_MODEL = "users.User"
 
+
 BINANCE_API_KEY = env("T_BINANCE_API_KEY", default="")
 BINANCE_API_SECRET = env("T_BINANCE_API_SECRET", default="")
+
 
 # ---------------------------------------------------------------------------
 # Binance Rate Limits (matches exchange info: 2400 weight/minute)

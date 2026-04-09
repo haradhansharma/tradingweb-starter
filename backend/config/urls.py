@@ -1,19 +1,14 @@
-# backend/config/urls.py
-
 from django.contrib import admin
 from django.urls import path, include
 from django.conf.urls.static import static
 from django.conf import settings
 from api.router import api  # Import the api instance
 
-admin.site.site_header = "SATTAADHAR admin"
-admin.site.site_title = "SATTAADHAR admin"
-# admin.site.site_url = ''
-admin.site.index_title = "SATTAADHAR administration"
-# admin.empty_value_display = '**Empty**'
+admin.site.site_header = "WebTrading Options Intelligence admin"
+admin.site.site_title = "WebTrading Options Intelligence admin"
+admin.site.index_title = "WebTrading Options Intelligence administration"
 
 admin.autodiscover()
-# admin.site.login = secure_admin_login(admin.site.login)  # type: ignore
 
 urlpatterns = [
     path("admin/", admin.site.urls),

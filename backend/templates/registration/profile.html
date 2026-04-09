@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MarketPulse — Profile</title>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'DM Sans', sans-serif; background: #0f1117; color: #e5e7eb; min-height: 100vh; }
+        .topbar {
+            background: #1a1d27;
+            border-bottom: 1px solid #2a2d3a;
+            padding: 12px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .topbar .logo { font-family: 'Space Grotesk', sans-serif; font-size: 18px; font-weight: 700; color: #60a5fa; }
+        .topbar a { color: #9ca3af; text-decoration: none; font-size: 13px; }
+        .topbar a:hover { color: #e5e7eb; }
+        .container { max-width: 700px; margin: 40px auto; padding: 0 24px; }
+        .card {
+            background: #1a1d27;
+            border: 1px solid #2a2d3a;
+            border-radius: 12px;
+            padding: 28px;
+            margin-bottom: 24px;
+        }
+        .card h2 { font-family: 'Space Grotesk', sans-serif; font-size: 18px; font-weight: 600; margin-bottom: 20px; }
+        .field { margin-bottom: 16px; }
+        .field label { display: block; font-size: 12px; color: #6b7280; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.05em; }
+        .field .value { font-size: 15px; }
+        .nav-links { display: flex; gap: 12px; }
+        .nav-links a {
+            display: inline-block; padding: 8px 16px; background: #1e293b;
+            border: 1px solid #334155; border-radius: 8px; color: #e5e7eb;
+            text-decoration: none; font-size: 13px; transition: all 0.2s;
+        }
+        .nav-links a:hover { background: #334155; }
+        .nav-links a.active { background: #3b82f6; border-color: #3b82f6; }
+    </style>
+</head>
+<body>
+    <div class="topbar">
+        <span class="logo">MarketPulse</span>
+        <div>
+            <a href="{% url 'profile' %}">Profile</a> &middot;
+            <a href="{% url 'credentials' %}">API Credentials</a> &middot;
+            <a href="{% url 'logout' %}">Logout</a>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="nav-links">
+            <a href="{% url 'profile' %}" class="active">Profile</a>
+            <a href="{% url 'credentials' %}">API Credentials</a>
+            <a href="/">Dashboard</a>
+        </div>
+
+        <div class="card">
+            <h2>User Profile</h2>
+            <div class="field">
+                <label>Username</label>
+                <div class="value">{{ user.username }}</div>
+            </div>
+            <div class="field">
+                <label>Email</label>
+                <div class="value">{{ user.email|default:"Not set" }}</div>
+            </div>
+            <div class="field">
+                <label>Joined</label>
+                <div class="value">{{ user.date_joined|date:"M d, Y" }}</div>
+            </div>
+            <div class="field">
+                <label>Risk Tolerance</label>
+                <div class="value">{{ user.get_risk_tolerance_display }}</div>
+            </div>
+            <div class="field">
+                <label>Tracked Assets</label>
+                <div class="value">{{ user.tracked_assets|join:", "|default:"None" }}</div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Notification Preferences</h2>
+            <div class="field">
+                <label>Strong Signals</label>
+                <div class="value">{{ user.notify_strong_signals|yesno:"Enabled,Disabled" }}</div>
+            </div>
+            <div class="field">
+                <label>Whale Activity</label>
+                <div class="value">{{ user.notify_whale_activity|yesno:"Enabled,Disabled" }}</div>
+            </div>
+            <div class="field">
+                <label>Market Shifts</label>
+                <div class="value">{{ user.notify_market_shifts|yesno:"Enabled,Disabled" }}</div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

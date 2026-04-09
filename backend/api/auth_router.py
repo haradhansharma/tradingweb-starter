@@ -38,8 +38,8 @@ from ninja_jwt.schema import (
     TokenRefreshOutputSchema,
 )
 
-from apps.users.models import BrokerCredential
-from apps.common.broker_config import BROKER_CONFIGS
+from users.models import BrokerCredential
+from common.broker_config import BROKER_CONFIGS
 
 User = get_user_model()
 
@@ -184,7 +184,7 @@ auth_router = Router(tags=["auth"])
 def register(request, data: RegisterInputSchema):
     """Create a new user account. Returns user info on success."""
     # Check if registration is allowed
-    from apps.common.models import SiteSettings
+    from common.models import SiteSettings
     try:
         from django.contrib.sites.models import Site
         site_settings = getattr(Site.objects.get_current(), "settings", None)

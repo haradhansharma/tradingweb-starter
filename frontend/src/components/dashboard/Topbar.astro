@@ -4,8 +4,8 @@
  * Topbar — MarketPulse Header
  * =============================
  * Fixed header with page title, WebSocket connection status,
- * search input, dark mode toggle, and notification bell.
- * Reads reactive state from Alpine.js dashboard store.
+ * search input, dark mode toggle, notification bell, and auth controls.
+ * Reads reactive state from Alpine.js dashboard + auth store.
  */
 ---
 
@@ -104,9 +104,39 @@
       <span class="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 bg-red-500 rounded-full text-[8px] font-bold text-white flex items-center justify-center">3</span>
     </button>
 
-    <!-- Avatar -->
-    <div class="w-8 h-8 rounded-full bg-gradient-to-br from-emerald-400 to-teal-600 flex items-center justify-center text-white font-display font-semibold text-[10px] cursor-pointer ml-0.5">
-      JD
-    </div>
+    <!-- Auth Controls (topbar) -->
+    <!-- Logged out: Sign In button -->
+    <template x-if="!auth.isAuthenticated">
+      <a
+        href="/auth/login"
+        class="ml-1 px-3 py-1.5 text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
+      >
+        Sign In
+      </a>
+    </template>
+
+    <!-- Logged in: User menu -->
+    <template x-if="auth.isAuthenticated">
+      <div class="flex items-center gap-2 ml-1">
+        <!-- Settings link -->
+        <a
+          href="/settings"
+          class="w-8 h-8 rounded-lg bg-surface-600 border border-surface-200 flex items-center justify-center text-gray-400 hover:text-white hover:border-surface-100 transition-all"
+          title="Settings"
+        >
+          <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.852.997 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+          </svg>
+        </a>
+
+        <!-- Avatar with initials -->
+        <div
+          class="w-8 h-8 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white font-display font-semibold text-[10px] cursor-pointer"
+          :title="auth.username"
+          x-text="auth.username ? auth.username.substring(0, 2).toUpperCase() : '??'"
+        ></div>
+      </div>
+    </template>
   </div>
 </header>

@@ -1,0 +1,64 @@
+---
+/**
+ * Auth Layout — MarketPulse
+ * =========================
+ * Centered card layout for login/register pages.
+ * Dark theme, no sidebar/topbar.
+ */
+import '../styles/global.css';
+
+interface Props {
+  title?: string;
+}
+
+const { title = 'MarketPulse' } = Astro.props;
+---
+
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Real-time Futures Trading Signals based on Options Data" />
+    <title>{title}</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700&family=Space+Grotesk:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+
+    <!-- Alpine.js + Auth Store -->
+    <script>
+      import { createAuthStore } from '../stores/authStore.ts';
+
+      const authStore = createAuthStore();
+
+      // Global helper to access auth store from Alpine components
+      function getAlpineStore() {
+        return {
+          getAuthStore: () => authStore,
+        };
+      }
+
+      document.addEventListener('alpine:init', () => {
+        (window as any).Alpine.data('auth', () => authStore);
+        (window as any).getAlpineStore = getAlpineStore;
+      });
+
+      // Auto-init auth on page load
+      authStore.init();
+    </script>
+  </head>
+
+  <body class="h-full bg-[#0f1117] flex items-center justify-center">
+    <div class="w-full max-w-[400px] px-6">
+      <div class="bg-[#1a1d27] border border-[#2a2d3a] rounded-xl shadow-2xl p-8">
+        <slot />
+      </div>
+    </div>
+  </body>
+</html>

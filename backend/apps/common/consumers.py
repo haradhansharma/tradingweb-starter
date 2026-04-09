@@ -3,6 +3,12 @@ WebSocket Consumer for Market Data
 ====================================
 Handles frontend WebSocket connections, subscription management, and data delivery.
 
+Authentication:
+  - JWT token passed as query parameter: ws/market/?token=<access_token>
+  - Auth is optional for market data (public streams available to all)
+  - Auth is required for order-related channels (future feature)
+  - The `scope["user"]` is set when a valid token is provided
+
 Fixes applied:
   - Unsubscribe KeyError guard (discard instead of remove)
   - Disconnect reason logging
@@ -10,12 +16,14 @@ Fixes applied:
   - Heartbeat mechanism (server → client ping every 30s)
   - Proper group cleanup on disconnect
   - Instant push on subscribe for cached categories (indicators, intelligence, markPrice)
+  - JWT authentication via query parameter
 """
 
 import json
 import asyncio
 import logging
 from channels.generic.websocket import AsyncWebsocketConsumer
+from channels.db import database_sync_to_async
 
 from .broker_config import DEFAULT_BROKER, ws_group_name, ws_global_group, ws_universal_group, redis_key
 from django.conf import settings
@@ -42,7 +50,11 @@ ALLOWED_CATEGORIES = {
 
 class MarketConsumer(AsyncWebsocketConsumer):
     async def connect(self):
-        """Accept WebSocket connection, start heartbeat, auto-join global groups."""
+        """Accept WebSocket connection, authenticate (optional), start heartbeat."""
+        # ── JWT Authentication (optional) ──
+        # Token is passed as query param: ws/market/?token=<access_token>
+        await self._authenticate()
+
         await self.accept()
         self.subscribed_groups = set()
         self.heartbeat_task = asyncio.create_task(self._heartbeat_loop())
@@ -56,7 +68,11 @@ class MarketConsumer(AsyncWebsocketConsumer):
         await self.channel_layer.group_add(universal_sessions_group, self.channel_name)
         self.subscribed_groups.add(universal_sessions_group)
 
-        logger.info(f"Frontend WS Connected: {self.channel_name}")
+        user_info = ""
+        user = self.scope.get("user")
+        if user and user.is_authenticated:
+            user_info = f" (user={user.username})"
+        logger.info(f"Frontend WS Connected: {self.channel_name}{user_info}")
 
     async def disconnect(self, close_code):
         """Clean up: cancel heartbeat, leave all groups, log reason."""
@@ -189,6 +205,55 @@ class MarketConsumer(AsyncWebsocketConsumer):
         Triggered by RedisBridge's group_send. The 'type' must match this method name.
         """
         await self.send(text_data=json.dumps(event["payload"]))
+
+    # ------------------------------------------------------------------
+    # JWT Authentication
+    # ------------------------------------------------------------------
+
+    async def _authenticate(self):
+        """
+        Authenticate the WebSocket connection using a JWT token
+        passed as a query parameter.
+
+        Flow:
+          1. Extract ?token=<access_token> from the WebSocket URL
+          2. Validate the JWT using ninja_jwt's JWTAuth backend
+          3. Set scope["user"] if valid; keep as AnonymousUser if not
+
+        Authentication is OPTIONAL — unauthenticated connections can
+        still subscribe to public market data streams.
+        """
+        from channels.auth import get_user
+        from django.contrib.auth.models import AnonymousUser
+
+        # Default to anonymous
+        self.scope["user"] = AnonymousUser()
+
+        # Extract token from query string
+        query_string = self.scope.get("query_string", b"").decode("utf-8")
+        if not query_string:
+            return
+
+        # Parse query params manually (no urllib.parse dependency needed)
+        token = None
+        for param in query_string.split("&"):
+            if param.startswith("token="):
+                token = param[6:]
+                break
+
+        if not token:
+            return
+
+        try:
+            from ninja_jwt.authentication import JWTBaseAuthentication
+
+            jwt_auth = JWTBaseAuthentication()
+            validated_token = await database_sync_to_async(jwt_auth.get_validated_token)(token)
+            user = await database_sync_to_async(jwt_auth.get_user)(validated_token)
+            self.scope["user"] = user
+        except Exception as e:
+            logger.debug(f"WS JWT auth failed: {e}")
+            # Don't reject the connection — just remain anonymous
 
     # ------------------------------------------------------------------
     # Instant Push on Subscribe

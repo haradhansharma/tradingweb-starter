@@ -1,0 +1,110 @@
+---
+/**
+ * Login Page — MarketPulse
+ * =========================
+ * JWT-based login for the Astro SPA.
+ * On success, redirects to the dashboard.
+ */
+import AuthLayout from '../../layouts/AuthLayout.astro';
+---
+
+<AuthLayout title="Sign In — MarketPulse">
+  <div x-data="authForm()" x-init="init()">
+    <!-- Logo -->
+    <div class="text-center mb-8">
+      <h1 class="text-2xl font-bold text-blue-400" style="font-family: 'Space Grotesk', sans-serif;">
+        MarketPulse
+      </h1>
+      <p class="text-sm text-gray-500 mt-1">Options Intelligence Dashboard</p>
+    </div>
+
+    <!-- Error -->
+    <div
+      x-show="error"
+      x-transition
+      class="mb-4 p-3 bg-red-900/30 border border-red-800 rounded-lg text-sm text-red-300"
+      x-text="error"
+    ></div>
+
+    <!-- Form -->
+    <form @submit.prevent="handleLogin()">
+      <div class="mb-4">
+        <label class="block text-xs font-medium text-gray-400 uppercase tracking-wider mb-1.5">Username</label>
+        <input
+          type="text"
+          x-model="username"
+          autocomplete="username"
+          required
+          class="w-full px-3.5 py-2.5 bg-[#0f1117] border border-[#2a2d3a] rounded-lg text-sm text-gray-200 outline-none focus:border-blue-500 transition-colors"
+          placeholder="Enter your username"
+        >
+      </div>
+
+      <div class="mb-6">
+        <label class="block text-xs font-medium text-gray-400 uppercase tracking-wider mb-1.5">Password</label>
+        <input
+          type="password"
+          x-model="password"
+          autocomplete="current-password"
+          required
+          class="w-full px-3.5 py-2.5 bg-[#0f1117] border border-[#2a2d3a] rounded-lg text-sm text-gray-200 outline-none focus:border-blue-500 transition-colors"
+          placeholder="Enter your password"
+        >
+      </div>
+
+      <button
+        type="submit"
+        :disabled="loading"
+        class="w-full py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-semibold rounded-lg transition-colors"
+      >
+        <span x-show="!loading">Sign In</span>
+        <span x-show="loading" class="flex items-center justify-center gap-2">
+          <svg class="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
+            <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="32" stroke-dashoffset="32" stroke-linecap="round"/>
+          </svg>
+          Signing in...
+        </span>
+      </button>
+    </form>
+
+    <!-- Footer -->
+    <p class="text-center text-sm text-gray-500 mt-6">
+      Don't have an account?
+      <a href="/auth/register" class="text-blue-400 hover:text-blue-300 ml-1">Create one</a>
+    </p>
+  </div>
+</AuthLayout>
+
+<script>
+  document.addEventListener('alpine:init', () => {
+    Alpine.data('authForm', () => {
+      const { getAuthStore } = getAlpineStore();
+
+      return {
+        username: '',
+        password: '',
+        loading: false,
+        error: null,
+
+        init() {
+          // If already authenticated, redirect
+        },
+
+        async handleLogin() {
+          this.loading = true;
+          this.error = null;
+
+          const auth = getAuthStore();
+          const success = await auth.login(this.username, this.password);
+
+          if (success) {
+            window.location.href = '/';
+          } else {
+            this.error = auth.error || 'Login failed. Please try again.';
+            this.loading = false;
+          }
+        },
+      };
+    });
+  });
+</script>

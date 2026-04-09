@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 
-from .models import User, BrokerCredential
+from users.models import User, BrokerCredential
 
 
 @admin.register(User)

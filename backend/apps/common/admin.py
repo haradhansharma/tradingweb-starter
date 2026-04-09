@@ -4,7 +4,7 @@ from django.contrib import admin
 from django.contrib.sites.models import Site
 from django.contrib.sites.admin import SiteAdmin
 
-from .models import CustomSite, SiteSettings
+from common.models import CustomSite, SiteSettings
 
 
 class CustomSiteAdmin(SiteAdmin):

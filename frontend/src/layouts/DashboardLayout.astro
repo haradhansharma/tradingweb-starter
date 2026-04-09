@@ -9,6 +9,7 @@
  *   - Scrollable main content area
  *   - Google Fonts (Space Grotesk + DM Sans)
  *   - Tailwind dark mode class on <html>
+ *   - Auth store integration (JWT)
  */
 
 import Sidebar from '../components/dashboard/Sidebar.astro';
@@ -39,22 +40,37 @@ const { title = 'MarketPulse — Options Analysis' } = Astro.props;
       rel="stylesheet"
     />
 
-    <!-- Alpine.js + Store: loaded as ES module via script tag -->
+    <!-- Alpine.js + Stores: loaded as ES module via script tag -->
     <script>
-      // Import store inline so Alpine.js can access it via window
+      // Import stores
       import { createDashboardStore } from '../stores/dashboard.ts';
+      import { createAuthStore } from '../stores/authStore.ts';
 
-      // Initialize store and make it globally accessible to Alpine
+      // Initialize stores
       const store = createDashboardStore();
+      const authStore = createAuthStore();
 
-      // Expose to Alpine.js as global data function
+      // Global helper to access auth store from components
+      function getAlpineStore() {
+        return {
+          getAuthStore: () => authStore,
+        };
+      }
+
+      // Expose to Alpine.js as global data functions
       document.addEventListener('alpine:init', () => {
-        // Merge store properties into Alpine's root data
+        // Dashboard store (primary — set on <html> via x-data="dashboard()")
         (window as any).Alpine.data('dashboard', () => store);
+
+        // Auth store (secondary — available as `auth` in components)
+        (window as any).Alpine.data('auth', () => authStore);
+
+        // Global helper
+        (window as any).getAlpineStore = getAlpineStore;
       });
 
-      // Initialize WebSocket connections after Alpine mounts
-      // Note: init() is called via x-init on <html> tag instead
+      // Auto-init auth on page load (validates existing tokens)
+      authStore.init();
 
       // Cleanup on page navigation
       document.addEventListener('astro:before-swap', () => {

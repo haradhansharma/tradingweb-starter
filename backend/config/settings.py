@@ -40,10 +40,10 @@ INSTALLED_APPS = [
     "channels",
     "django_celery_results",
     "django_celery_beat",
-    "users",
+    "apps.users",
     'ninja_extra',
     'ninja_jwt',
-    "common",
+    "apps.common",
 ]
 
 MIDDLEWARE = [

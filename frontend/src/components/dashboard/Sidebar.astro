@@ -89,14 +89,30 @@
 
   <!-- ── User Profile ── -->
   <div class="p-4 border-t border-surface-500 shrink-0">
-    <div class="flex items-center gap-3">
-      <div class="w-9 h-9 rounded-full bg-gradient-to-br from-emerald-400 to-teal-600 flex items-center justify-center text-white font-display font-semibold text-xs">
-        JD
-      </div>
-      <div class="flex-1 min-w-0">
-        <p class="text-[13px] font-medium text-gray-200 truncate">John Doe</p>
-        <p class="text-[11px] text-gray-500 truncate">Pro Account</p>
-      </div>
-    </div>
+    <template x-if="auth.isAuthenticated">
+      <a href="/settings" class="flex items-center gap-3 group cursor-pointer">
+        <div class="w-9 h-9 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white font-display font-semibold text-xs"
+          x-text="auth.username ? auth.username.substring(0, 2).toUpperCase() : '??'"
+        ></div>
+        <div class="flex-1 min-w-0">
+          <p class="text-[13px] font-medium text-gray-200 truncate group-hover:text-white transition-colors" x-text="auth.username || 'User'"></p>
+          <p class="text-[11px] text-gray-500 truncate">Settings &rarr;</p>
+        </div>
+      </a>
+    </template>
+    <template x-if="!auth.isAuthenticated">
+      <a href="/auth/login" class="flex items-center gap-3 group cursor-pointer">
+        <div class="w-9 h-9 rounded-full bg-surface-600 border border-surface-400 flex items-center justify-center text-gray-500">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+            <circle cx="12" cy="7" r="4"/>
+          </svg>
+        </div>
+        <div class="flex-1 min-w-0">
+          <p class="text-[13px] font-medium text-gray-400 group-hover:text-gray-200 transition-colors">Sign In</p>
+          <p class="text-[11px] text-gray-500 truncate">Access your account</p>
+        </div>
+      </a>
+    </template>
   </div>
 </aside>

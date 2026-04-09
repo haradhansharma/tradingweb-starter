@@ -35,7 +35,20 @@
 
 // ── Configuration Constants ──
 
-const WS_BASE = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/market/`;
+const WS_PATH = '/ws/market/';
+
+function getWsBaseUrl(): string {
+  const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
+  const host = location.host;
+  const base = `${protocol}://${host}${WS_PATH}`;
+
+  // Append JWT token if available (for optional WS authentication)
+  const token = localStorage.getItem('mp_access_token');
+  if (token) {
+    return `${base}?token=${encodeURIComponent(token)}`;
+  }
+  return base;
+}
 
 const INITIAL_RECONNECT_DELAY_MS = 1_000;
 const MAX_RECONNECT_DELAY_MS = 30_000;
@@ -186,7 +199,7 @@ class MarketWebSocket {
     }
 
     try {
-      this.ws = new WebSocket(WS_BASE);
+      this.ws = new WebSocket(getWsBaseUrl());
     } catch (e) {
       console.error('[WS] Failed to create WebSocket:', e);
       this._scheduleReconnect();
@@ -194,7 +207,7 @@ class MarketWebSocket {
     }
 
     this.ws.onopen = () => {
-      console.log('[WS] Connected to', WS_BASE);
+      console.log('[WS] Connected to', WS_PATH);
       this.reconnectDelay = INITIAL_RECONNECT_DELAY_MS;
       this.lastMessageTime = Date.now();
       this._startHeartbeat();

@@ -31,6 +31,11 @@ class User(AbstractUser):
     def __str__(self):
 
         return self.username
+    
+    class Meta:
+        app_label = 'users'
+        # verbose_name = "U"
+        # verbose_name_plural = "Custom Sites"
 
 
 
@@ -87,6 +92,7 @@ class BrokerCredential(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
+        app_label = 'users'
         unique_together = ("user", "broker", "label")
         verbose_name = "Broker Credential"
         verbose_name_plural = "Broker Credentials"

@@ -5,9 +5,11 @@ ASGI Configuration
 ==================
 Django ASGI application with Channels WebSocket support.
 
-Note: AuthMiddlewareStack is retained for future authentication.
-When consumer auth is implemented, this middleware will validate
-the user from the scope and enforce subscription permissions.
+Auth flow:
+  - HTTP requests: standard Django middleware chain handles session cookies
+  - WebSocket requests: AuthMiddlewareStack wraps the consumer, allowing
+    scope["user"] to be populated. The consumer also supports JWT auth
+    via query parameter as a secondary mechanism.
 """
 
 import os

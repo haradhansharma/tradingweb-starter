@@ -194,12 +194,16 @@ services:
   #     - trading_net
 
   # --------------------
-  # 7. BINANCE STREAMER (Dedicated Process)
+  # 7. OPTIONS STREAMER (Multi-Broker — Single Process)
   # --------------------
-  t_binance_streamer:
+  # Unified streamer for ALL registered brokers in BROKER_CONFIGS.
+  # Uses async multiplexing — one container handles N brokers.
+  # To add a new broker: add to BROKER_CONFIGS → restart → done.
+  # No additional containers needed.
+  t_options_streamer:
     build: ./backend
-    container_name: t_binance_streamer
-    command: python manage.py binance_streamer
+    container_name: t_options_streamer
+    command: python manage.py options_streamer
     volumes:
       - ./backend:/app
     env_file:
@@ -209,20 +213,21 @@ services:
         condition: service_healthy
       t_db:
         condition: service_healthy
-      # t_init_sync:
-      #   condition: service_completed_successfully
+      tbackend:
+        condition: service_started
     restart: on-failure
     networks:
       - trading_net
 
 
   # --------------------
-  # 9. FUTURES KLINE STREAMER (Dedicated Process — Independent)
+  # 8. FUTURES KLINE STREAMER (Multi-Broker — Single Process)
   # --------------------
-  # Separate container for futures kline data + technical indicators.
+  # Unified futures streamer for ALL registered brokers.
+  # Seeds historical kline data via REST per broker, then maintains via WS.
   # Completely independent from the Options streamer — if this crashes,
   # the 7-variable intelligence engine is unaffected.
-  # Seeds 500 historical 1m candles on startup, then maintains via WS.
+  # Container count stays fixed at 1 regardless of broker count.
   t_futures_streamer:
     build: ./backend
     container_name: t_futures_streamer

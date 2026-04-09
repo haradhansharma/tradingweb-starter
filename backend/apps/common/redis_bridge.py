@@ -338,8 +338,8 @@ class RedisBridge:
             if now - last_snap >= SNAPSHOT_INTERVAL_SEC:
                 self.last_snapshot_time[asset] = now
                 try:
-                    from .tasks import save_intelligence_snapshot
-                    save_intelligence_snapshot.delay(asset, intel_report)
+                    from .tasks import _base_save_intelligence_snapshot
+                    _base_save_intelligence_snapshot(self.broker, asset, intel_report)
                 except Exception as snap_err:
                     logger.warning(
                         f"Snapshot enqueue failed for {asset}: {snap_err}"

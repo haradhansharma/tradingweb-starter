@@ -10,6 +10,7 @@ class CustomSite(Site):
     maintenance_mode = models.BooleanField(default=False)
 
     class Meta:
+        app_label = 'common'
         verbose_name = "Custom Site"
         verbose_name_plural = "Custom Sites"
 
@@ -26,6 +27,7 @@ class SiteSettings(models.Model):
     max_users = models.PositiveIntegerField(default=0, help_text="0 means unlimited")
 
     class Meta:
+        app_label = 'common'
         verbose_name = "Site Setting"
         verbose_name_plural = "Site Settings"
 
@@ -35,9 +37,13 @@ class SiteSettings(models.Model):
 
 class IntelligenceSnapshot(models.Model):
     """
-    Optional: Store historical intelligence snapshots for analysis.
+    Store historical intelligence snapshots for audit trail and analysis.
+    Each snapshot is scoped to a broker so data from different exchanges
+    is never mixed. The composite index on (broker, asset, -timestamp)
+    ensures efficient per-broker queries.
     """
 
+    broker = models.CharField(max_length=20, default="binance", db_index=True)
     asset = models.CharField(max_length=10, db_index=True)
     timestamp = models.DateTimeField(auto_now_add=True, db_index=True)
 
@@ -60,8 +66,10 @@ class IntelligenceSnapshot(models.Model):
     class Meta:
         ordering = ["-timestamp"]
         indexes = [
+            models.Index(fields=["broker", "asset", "-timestamp"]),
             models.Index(fields=["asset", "-timestamp"]),
         ]
 
     def __str__(self):
-        return f"{self.asset} @ {self.timestamp}: {self.action}"
+        return f"[{self.broker}] {self.asset} @ {self.timestamp}: {self.action}"
+

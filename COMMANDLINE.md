@@ -199,6 +199,26 @@ sync_open_interest.delay()
 sync_tickers_rest.delay()
 sync_recent_trades_rest.delay()
 "
+
+docker exec -it t_celery_worker python manage.py shell -c "
+from apps.common.broker_config import BROKER_CONFIGS
+from celery import current_app
+
+tasks = [
+    'sync_exchange_structure', 
+    'sync_open_interest', 
+    'sync_tickers_rest', 
+    'sync_recent_trades_rest'
+]
+
+for broker_id in BROKER_CONFIGS:
+    for task_type in tasks:
+        task_name = f'{broker_id}:{task_type}'
+        print(f'Triggering: {task_name}')
+        current_app.send_task(task_name)
+"
+
+python manage.py shell -c "from django_celery_beat.models import PeriodicTask; PeriodicTask.objects.all().delete()"
 ```
 
 ### Celery Beat (Scheduler)

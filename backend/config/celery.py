@@ -2,12 +2,21 @@
 """
 Celery Configuration
 =====================
-Celery app setup with beat schedule, task tracking, and worker settings.
+Celery app setup with dynamic beat schedule that auto-generates tasks
+for every broker registered in BROKER_CONFIGS.
+
+Architecture:
+  - Beat schedule is built dynamically from BROKER_CONFIGS at startup
+  - Each broker gets 4 periodic tasks: exchange_structure, open_interest,
+    tickers, trades
+  - Task names follow: {broker}:{task_type} (e.g. "binance:sync_open_interest")
+  - Adding a new broker: just add entry to BROKER_CONFIGS — beat schedule
+    auto-adapts. No changes needed here.
 
 Fixes applied:
   - task_acks_late for crash recovery
   - task_reject_on_worker_lost to prevent zombie tasks
-  - Beat schedule intervals documented
+  - Dynamic beat schedule from BROKER_CONFIGS (not hardcoded)
 """
 
 from __future__ import absolute_import, unicode_literals
@@ -35,31 +44,57 @@ app.conf.task_reject_on_worker_lost = True
 app.conf.task_default_retry_delay = 30   # seconds
 app.conf.task_max_retries = 3
 
+
 # ---------------------------------------------------------------------------
-# Beat Schedule
+# Dynamic Beat Schedule Builder
 # ---------------------------------------------------------------------------
-app.conf.beat_schedule = {
-    # Structural data: changes infrequently, sync once per hour
-    "sync_exchange_structure_1h": {
-        "task": "sync_exchange_structure",
-        "schedule": 3600.0,
-    },
-    # Open Interest: moderate frequency, 5-minute REST sync
-    "sync_open_interest_5m": {
-        "task": "sync_open_interest",
-        "schedule": 300.0,
-    },
-    # Tickers: 30-second REST sync (supplements WS stream as fallback seed)
-    "sync_tickers_30s": {
-        "task": "sync_tickers_rest",
-        "schedule": 30.0,
-    },
-    # Block Trades: 1-minute REST sync (seeds trade cache on startup)
-    "sync_trades_1m": {
-        "task": "sync_recent_trades_rest",
-        "schedule": 60.0,
-    },
+# Schedule intervals per task type (in seconds).
+# These apply to ALL brokers uniformly.
+TASK_SCHEDULES = {
+    "sync_exchange_structure": 3600.0,    # 1 hour — structural data changes infrequently
+    "sync_open_interest": 300.0,           # 5 minutes — moderate frequency
+    "sync_tickers_rest": 30.0,             # 30 seconds — supplements WS stream
+    "sync_recent_trades_rest": 60.0,       # 1 minute — seeds trade cache on startup
 }
+
+
+def build_beat_schedule():
+    """
+    Dynamically build the beat schedule from BROKER_CONFIGS.
+
+    For each registered broker, creates 4 scheduled entries:
+      - {broker}_sync_exchange_structure_1h
+      - {broker}_sync_open_interest_5m
+      - {broker}_sync_tickers_30s
+      - {broker}_sync_trades_1m
+
+    Task names match the dynamically registered tasks in tasks.py:
+      {broker}:sync_exchange_structure
+      {broker}:sync_open_interest
+      {broker}:sync_tickers_rest
+      {broker}:sync_recent_trades_rest
+
+    Returns:
+        dict suitable for app.conf.beat_schedule
+    """
+    from apps.common.broker_config import BROKER_CONFIGS
+
+    schedule = {}
+
+    for broker_id in BROKER_CONFIGS:
+        for task_type, interval in TASK_SCHEDULES.items():
+            schedule_key = f"{broker_id}_{task_type}"
+            schedule[schedule_key] = {
+                "task": f"{broker_id}:{task_type}",
+                "schedule": interval,
+            }
+
+    return schedule
+
+
+# Build and set the dynamic beat schedule
+# This runs when celery.py is imported (beat startup)
+app.conf.beat_schedule = build_beat_schedule()
 
 
 # from __future__ import absolute_import, unicode_literals

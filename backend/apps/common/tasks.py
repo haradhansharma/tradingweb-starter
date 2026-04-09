@@ -1,15 +1,20 @@
 """
-Celery Tasks for Binance Options Data Sync
-===========================================
-Periodic tasks that seed and refresh Redis cache via REST API.
-All data is NORMALIZED to canonical schema before writing to Redis.
+Celery Tasks — Dynamic Broker Registry
+=======================================
+Broker-parameterized periodic tasks that seed and refresh Redis cache
+via REST API. All data is NORMALIZED to canonical schema before writing.
+
+Architecture (Dynamic Broker Registry):
+  - Base functions accept `broker` parameter and are broker-agnostic
+  - Tasks are dynamically registered per broker from BROKER_CONFIGS
+  - Each broker gets its own named task: e.g. "binance:sync_exchange_structure"
+  - Adding a new broker: just add entry to BROKER_CONFIGS — tasks auto-register
 
 Fixes applied:
   - Connection leak in sync_exchange_structure (bridge.close() now called)
   - Normalizers applied at write time (canonical schema only in Redis)
-  - Rate limits from settings (no magic numbers)
-  - Consistent snake_case naming
-  - Error handling with status propagation
+  - Rate limits from broker_config (no hardcoded BINANCE_RATE_LIMITS)
+  - Broker isolation — no data mixing between exchanges
 """
 
 import logging
@@ -21,7 +26,8 @@ from datetime import datetime
 from celery import shared_task
 from django.conf import settings
 
-from .binance_rest import BinanceRESTClient, BinanceAPIError
+# Use broker-agnostic imports (backward-compatible aliases exist)
+from .binance_rest import OptionsRESTClient, OptionsAPIError
 from .normalizers import normalize_oi_list, normalize_trade_list
 from .assets import get_assets_sync
 from .redis_bridge import (
@@ -33,31 +39,30 @@ from .redis_bridge import (
 from .broker_config import (
     redis_key,
     redis_global_key,
-    DEFAULT_BROKER,
+    BROKER_CONFIGS,
+    get_rate_limits,
 )
 
 logger = logging.getLogger("celery.tasks")
 
 
 # ---------------------------------------------------------------------------
-# Rate Limit Configuration (from settings or defaults)
+# Rate Limit Configuration (broker-aware — from broker_config)
 # ---------------------------------------------------------------------------
-def _get_rate_limits() -> dict:
-    return getattr(
-        settings,
-        "BINANCE_RATE_LIMITS",
-        {
-            "requests_per_second": 50,
-            "semaphore_limit": 5,  # Conservative concurrent requests
-            "inter_request_delay": 0.1,  # Seconds between requests (burst prevention)
-        },
-    )
+def _get_rate_limits(broker: str) -> dict:
+    """Get rate limits from broker_config instead of hardcoded settings."""
+    return get_rate_limits(broker)
 
 
-@shared_task(name="sync_exchange_structure")
-def sync_exchange_structure():
+# ===========================================================================
+# BASE FUNCTIONS (broker-parameterized, NOT Celery tasks themselves)
+# ===========================================================================
+# These are the actual implementation. Celery tasks below are thin wrappers
+# that bind a specific broker to these base functions.
+
+def _base_sync_exchange_structure(broker: str) -> str:
     """Sync symbols and notify the system of structural changes."""
-    client = BinanceRESTClient(testnet=False)
+    client = OptionsRESTClient(broker=broker)
     r_sync = _get_sync_redis()
 
     try:
@@ -67,7 +72,7 @@ def sync_exchange_structure():
             return "No optionSymbols found in exchange info."
 
         # Cache the full blueprint
-        r_sync.set(redis_global_key(DEFAULT_BROKER, "exchange_info"), json.dumps(data), ex=3600)
+        r_sync.set(redis_global_key(broker, "exchange_info"), json.dumps(data), ex=3600)
 
         # Rank assets by number of active strikes (liquidity proxy)
         asset_counts = {}
@@ -76,12 +81,12 @@ def sync_exchange_structure():
             asset_counts[u] = asset_counts.get(u, 0) + 1
 
         top_assets = sorted(asset_counts, key=asset_counts.get, reverse=True)[:20]
-        r_sync.set(redis_global_key(DEFAULT_BROKER, "active_underlyings"), json.dumps(top_assets))
-        logger.info(f"Top 20 Assets Identified: {top_assets}")
+        r_sync.set(redis_global_key(broker, "active_underlyings"), json.dumps(top_assets))
+        logger.info(f"[{broker}] Top 20 Assets Identified: {top_assets}")
 
         # Notify system via bridge — with PROPER cleanup
         async def notify():
-            bridge = RedisBridge(broker=DEFAULT_BROKER)
+            bridge = RedisBridge(broker=broker)
             try:
                 await bridge.broadcast(
                     "meta",
@@ -89,25 +94,24 @@ def sync_exchange_structure():
                     {"event": "TOP_ASSETS_UPDATED", "assets": top_assets},
                 )
             finally:
-                await bridge.close()  # FIX: was missing
+                await bridge.close()
 
         asyncio.run(notify())
         logger.info(
-            f"Exchange structure synced: {len(data['optionSymbols'])} symbols, "
+            f"[{broker}] Exchange structure synced: {len(data['optionSymbols'])} symbols, "
             f"{len(top_assets)} top assets."
         )
-        return f"Sync Success: {len(data['optionSymbols'])} symbols, {len(top_assets)} top assets identified."
+        return f"[{broker}] Sync Success: {len(data['optionSymbols'])} symbols, {len(top_assets)} top assets identified."
 
-    except BinanceAPIError as e:
-        logger.error(f"sync_exchange_structure API error: {e}")
-        return f"API Error: {e}"
+    except OptionsAPIError as e:
+        logger.error(f"[{broker}] sync_exchange_structure API error: {e}")
+        return f"[{broker}] API Error: {e}"
     except Exception as e:
-        logger.error(f"sync_exchange_structure failed: {e}", exc_info=True)
-        return f"Failed: {e}"
+        logger.error(f"[{broker}] sync_exchange_structure failed: {e}", exc_info=True)
+        return f"[{broker}] Failed: {e}"
 
 
-@shared_task(name="sync_open_interest")
-def sync_open_interest():
+def _base_sync_open_interest(broker: str) -> str:
     """
     Scaled Open Interest Sync.
     1. Fetches top 20 underlyings from Redis.
@@ -115,17 +119,17 @@ def sync_open_interest():
     3. Fetches OI for top 3 expirations per asset with rate-limited concurrency.
     4. NORMALIZES data before writing to Redis.
     """
-    client = BinanceRESTClient(testnet=False)
+    client = OptionsRESTClient(broker=broker)
     r_sync = _get_sync_redis()
-    rate_limits = _get_rate_limits()
+    rate_limits = _get_rate_limits(broker)
 
     # --- 1. GET TOP ASSETS ---
-    top_assets = get_assets_sync(r_sync)
+    top_assets = get_assets_sync(r_sync, broker=broker)
 
     # --- 2. GET STRUCTURAL DATA ---
-    ext_info_raw = r_sync.get(redis_global_key(DEFAULT_BROKER, "exchange_info"))
+    ext_info_raw = r_sync.get(redis_global_key(broker, "exchange_info"))
     if not ext_info_raw:
-        return "No Exchange Info found in cache."
+        return f"[{broker}] No Exchange Info found in cache."
     ext_info = json.loads(ext_info_raw)
 
     # --- 3. BUILD FILTERED JOB LIST ---
@@ -149,10 +153,7 @@ def sync_open_interest():
         semaphore = asyncio.Semaphore(rate_limits["semaphore_limit"])
         r_async = _get_async_redis()
 
-        # Track per-asset results for nearest-expiry promotion to key_latest.
-        # All expirations write to their per-exp keys; only the NEAREST
-        # is promoted to key_latest after all concurrent fetches finish.
-        asset_exp_data = {}  # {asset: [(exp_str, raw_json_payload), ...]}
+        asset_exp_data = {}
 
         async def fetch_with_limit(asset, base, exp):
             async with semaphore:
@@ -160,47 +161,39 @@ def sync_open_interest():
                     data = await client.get_open_interest(base, exp)
 
                     if isinstance(data, list) and len(data) > 0:
-                        # NORMALIZE before caching
-                        normalized = normalize_oi_list(data, source="rest", broker=DEFAULT_BROKER)
-                        key_exp = redis_key(DEFAULT_BROKER, asset, f"{CATEGORY_OPEN_INTEREST}:{exp}")
-                        # Wrap in payload structure consistent with bridge broadcast
+                        normalized = normalize_oi_list(data, source="rest", broker=broker)
+                        key_exp = redis_key(broker, asset, f"{CATEGORY_OPEN_INTEREST}:{exp}")
                         payload = {
                             "category": CATEGORY_OPEN_INTEREST,
                             "underlying": asset,
                             "data": normalized,
                         }
                         raw_val = json.dumps(payload)
-                        # Write per-expiry key (always, for historical access)
                         await r_async.set(key_exp, raw_val, ex=1800)
-                        # Track for nearest-expiry promotion (done after all fetches)
                         asset_exp_data.setdefault(asset, []).append((exp, raw_val))
-                        logger.debug(f"OI Updated: {asset} @ {exp}")
+                        logger.debug(f"[{broker}] OI Updated: {asset} @ {exp}")
 
                     await asyncio.sleep(rate_limits["inter_request_delay"])
-                except BinanceAPIError as e:
-                    logger.error(f"OI API error for {asset} {exp}: {e}")
+                except OptionsAPIError as e:
+                    logger.error(f"[{broker}] OI API error for {asset} {exp}: {e}")
                 except Exception as e:
-                    logger.error(f"OI Fetch failed for {asset} {exp}: {e}")
+                    logger.error(f"[{broker}] OI Fetch failed for {asset} {exp}: {e}")
 
         tasks = [fetch_with_limit(asset, base, exp) for asset, base, exp in jobs]
         await asyncio.gather(*tasks)
 
         # --- Post-processing: promote NEAREST expiry to key_latest per asset ---
-        # After all concurrent fetches complete, only the nearest-expiry OI
-        # snapshot is promoted to key_latest. This prevents non-deterministic
-        # overwrites (Issue #1) and ensures the engine sees near-term data.
         promotion_tasks = []
         for asset, exp_list in asset_exp_data.items():
             if not exp_list:
                 continue
-            # exp format: "YYMMDD" — string sort matches chronological order
             nearest_exp, nearest_data = min(exp_list, key=lambda x: x[0])
-            key_latest = redis_key(DEFAULT_BROKER, asset, CATEGORY_OPEN_INTEREST)
+            key_latest = redis_key(broker, asset, CATEGORY_OPEN_INTEREST)
             promotion_tasks.append(
                 r_async.set(key_latest, nearest_data, ex=1800)
             )
             logger.info(
-                f"OI key_latest promoted: {asset} → nearest exp {nearest_exp} "
+                f"[{broker}] OI key_latest promoted: {asset} → nearest exp {nearest_exp} "
                 f"(of {len(exp_list)} expirations fetched)"
             )
         if promotion_tasks:
@@ -210,19 +203,18 @@ def sync_open_interest():
 
     try:
         asyncio.run(run_scaled_sync())
-        return f"OI Scaled Sync complete for {len(top_assets)} assets ({len(jobs)} total jobs)"
+        return f"[{broker}] OI Scaled Sync complete for {len(top_assets)} assets ({len(jobs)} total jobs)"
     except Exception as e:
-        logger.error(f"sync_open_interest failed: {e}", exc_info=True)
-        return f"OI Sync Failed: {e}"
+        logger.error(f"[{broker}] sync_open_interest failed: {e}", exc_info=True)
+        return f"[{broker}] OI Sync Failed: {e}"
 
 
-@shared_task(name="sync_tickers_rest")
-def sync_tickers_rest():
+def _base_sync_tickers_rest(broker: str) -> str:
     """Fetch 24h ticker for all, filter for top 20 assets, normalize and cache."""
-    client = BinanceRESTClient(testnet=False)
+    client = OptionsRESTClient(broker=broker)
     r_sync = _get_sync_redis()
 
-    top_assets = get_assets_sync(r_sync)
+    top_assets = get_assets_sync(r_sync, broker=broker)
 
     try:
         data = asyncio.run(client.get_ticker())
@@ -235,36 +227,34 @@ def sync_tickers_rest():
                     grouped.setdefault(asset, []).append(item)
 
             for asset, tickers in grouped.items():
-                # Wrap in consistent payload structure
                 payload = {
                     "category": CATEGORY_TICKER,
                     "underlying": asset,
                     "data": tickers,
                 }
                 r_sync.set(
-                    redis_key(DEFAULT_BROKER, asset, CATEGORY_TICKER), json.dumps(payload), ex=60
+                    redis_key(broker, asset, CATEGORY_TICKER), json.dumps(payload), ex=60
                 )
 
-        return f"Tickers synced for {len(top_assets)} assets"
+        return f"[{broker}] Tickers synced for {len(top_assets)} assets"
 
-    except BinanceAPIError as e:
-        logger.error(f"sync_tickers API error: {e}")
-        return f"Ticker Sync API Error: {e}"
+    except OptionsAPIError as e:
+        logger.error(f"[{broker}] sync_tickers API error: {e}")
+        return f"[{broker}] Ticker Sync API Error: {e}"
     except Exception as e:
-        logger.error(f"sync_tickers_rest failed: {e}")
-        return f"Ticker Sync Failed: {e}"
+        logger.error(f"[{broker}] sync_tickers_rest failed: {e}")
+        return f"[{broker}] Ticker Sync Failed: {e}"
 
 
-@shared_task(name="sync_recent_trades_rest")
-def sync_recent_trades_rest():
+def _base_sync_recent_trades_rest(broker: str) -> str:
     """
     Seed trade cache using Block Trades, filtered for top 20 assets.
     Data is NORMALIZED to canonical trade schema before caching.
     """
-    client = BinanceRESTClient(testnet=False)
+    client = OptionsRESTClient(broker=broker)
     r_sync = _get_sync_redis()
 
-    top_assets = get_assets_sync(r_sync)
+    top_assets = get_assets_sync(r_sync, broker=broker)
 
     try:
         data = asyncio.run(client.get_block_trades())
@@ -277,25 +267,24 @@ def sync_recent_trades_rest():
                     grouped.setdefault(asset, []).append(t)
 
             for asset, trades in grouped.items():
-                # NORMALIZE REST trade data to canonical schema
-                normalized = normalize_trade_list(trades, source="rest", broker=DEFAULT_BROKER)
+                normalized = normalize_trade_list(trades, source="rest", broker=broker)
                 payload = {
                     "category": CATEGORY_TRADE,
                     "underlying": asset,
                     "data": normalized,
                 }
                 r_sync.set(
-                    redis_key(DEFAULT_BROKER, asset, CATEGORY_TRADE), json.dumps(payload), ex=3600
+                    redis_key(broker, asset, CATEGORY_TRADE), json.dumps(payload), ex=3600
                 )
 
-        return f"Trades seeded for {len(grouped)} assets (normalized)"
+        return f"[{broker}] Trades seeded for {len(grouped)} assets (normalized)"
 
-    except BinanceAPIError as e:
-        logger.error(f"sync_trades API error: {e}")
-        return f"Trade Sync API Error: {e}"
+    except OptionsAPIError as e:
+        logger.error(f"[{broker}] sync_trades API error: {e}")
+        return f"[{broker}] Trade Sync API Error: {e}"
     except Exception as e:
-        logger.error(f"sync_recent_trades_rest failed: {e}")
-        return f"Trade Sync Failed: {e}"
+        logger.error(f"[{broker}] sync_recent_trades_rest failed: {e}")
+        return f"[{broker}] Trade Sync Failed: {e}"
 
 
 def _sanitize_for_json(obj):
@@ -318,22 +307,20 @@ def _sanitize_for_json(obj):
     return obj
 
 
-@shared_task(name="save_intelligence_snapshot")
-def save_intelligence_snapshot(asset: str, report_data: dict):
+def _base_save_intelligence_snapshot(broker: str, asset: str, report_data: dict):
     """
     Persist an intelligence report to the database for audit trail and
-    historical analysis. Called asynchronously from the Redis bridge after
-    each intelligence calculation (throttled to ~60s intervals per asset).
+    historical analysis. Scoped by broker so data from different exchanges
+    is never mixed.
     """
-    from .models import IntelligenceSnapshot
+    from common.models import IntelligenceSnapshot
 
     try:
-        # Safety net: sanitize any Infinity/NaN from numpy calculations
-        # before PostgreSQL JSON serialization rejects them
         report_data = _sanitize_for_json(report_data)
 
         metrics = report_data.get("metrics", {})
         IntelligenceSnapshot.objects.create(
+            broker=broker,
             asset=asset,
             pcr=metrics.get("pcr", 0),
             max_pain=metrics.get("max_pain", 0),
@@ -346,9 +333,144 @@ def save_intelligence_snapshot(asset: str, report_data: dict):
             score=report_data.get("score", 0),
             raw_data=report_data,
         )
-        logger.debug(f"Snapshot saved: {asset} → {report_data.get('signal', '?')}")
+        logger.debug(f"[{broker}] Snapshot saved: {asset} → {report_data.get('signal', '?')}")
     except Exception as e:
-        logger.error(f"Failed to save snapshot for {asset}: {e}")
+        logger.error(f"[{broker}] Failed to save snapshot for {asset}: {e}")
+
+
+# ===========================================================================
+# DYNAMIC TASK REGISTRATION
+# ===========================================================================
+# For each broker in BROKER_CONFIGS, register a Celery task.
+# Task names follow: {broker}:sync_exchange_structure
+#                    {broker}:sync_open_interest
+#                    {broker}:sync_tickers_rest
+#                    {broker}:sync_recent_trades_rest
+#                    {broker}:save_intelligence_snapshot
+#
+# Backward-compatible aliases are registered for "binance" broker so
+# existing beat schedule entries using old names still work.
+
+def _register_broker_tasks():
+    """
+    Dynamically register Celery tasks for each broker in BROKER_CONFIGS.
+    Called once when this module is imported.
+    """
+    for broker_id in BROKER_CONFIGS:
+        _register_single_broker_tasks(broker_id)
+
+
+def _register_single_broker_tasks(broker: str):
+    """Register 5 tasks for a single broker."""
+
+    # --- sync_exchange_structure ---
+    task_name = f"{broker}:sync_exchange_structure"
+
+    @shared_task(name=task_name, bind=True)
+    def _task_sync_exchange_structure(self):
+        return _base_sync_exchange_structure(broker)
+
+    globals()[f"_task_sync_exchange_structure_{broker}"] = _task_sync_exchange_structure
+
+    # --- sync_open_interest ---
+    task_name = f"{broker}:sync_open_interest"
+
+    @shared_task(name=task_name, bind=True)
+    def _task_sync_open_interest(self):
+        return _base_sync_open_interest(broker)
+
+    globals()[f"_task_sync_open_interest_{broker}"] = _task_sync_open_interest
+
+    # --- sync_tickers_rest ---
+    task_name = f"{broker}:sync_tickers_rest"
+
+    @shared_task(name=task_name, bind=True)
+    def _task_sync_tickers_rest(self):
+        return _base_sync_tickers_rest(broker)
+
+    globals()[f"_task_sync_tickers_rest_{broker}"] = _task_sync_tickers_rest
+
+    # --- sync_recent_trades_rest ---
+    task_name = f"{broker}:sync_recent_trades_rest"
+
+    @shared_task(name=task_name, bind=True)
+    def _task_sync_recent_trades_rest(self):
+        return _base_sync_recent_trades_rest(broker)
+
+    globals()[f"_task_sync_recent_trades_rest_{broker}"] = _task_sync_recent_trades_rest
+
+    # --- save_intelligence_snapshot ---
+    task_name = f"{broker}:save_intelligence_snapshot"
+
+    @shared_task(name=task_name, bind=True)
+    def _task_save_intelligence_snapshot(self, asset: str, report_data: dict):
+        return _base_save_intelligence_snapshot(broker, asset, report_data)
+
+    globals()[f"_task_save_intelligence_snapshot_{broker}"] = _task_save_intelligence_snapshot
+
+
+# --- Register all broker tasks on module import ---
+_register_broker_tasks()
+
+
+# ===========================================================================
+# BACKWARD-COMPATIBLE ALIASES
+# ===========================================================================
+# Old task names (without broker prefix) that may be referenced in
+# existing beat schedule DB entries or code. These are thin wrappers
+# that delegate to the default broker's task.
+
+@shared_task(name="sync_exchange_structure")
+def sync_exchange_structure_compat():
+    """Backward-compatible: delegates to default broker's task."""
+    from .broker_config import DEFAULT_BROKER
+    return _base_sync_exchange_structure(DEFAULT_BROKER)
+
+
+@shared_task(name="sync_open_interest")
+def sync_open_interest_compat():
+    """Backward-compatible: delegates to default broker's task."""
+    from .broker_config import DEFAULT_BROKER
+    return _base_sync_open_interest(DEFAULT_BROKER)
+
+
+@shared_task(name="sync_tickers_rest")
+def sync_tickers_rest_compat():
+    """Backward-compatible: delegates to default broker's task."""
+    from .broker_config import DEFAULT_BROKER
+    return _base_sync_tickers_rest(DEFAULT_BROKER)
+
+
+@shared_task(name="sync_recent_trades_rest")
+def sync_recent_trades_rest_compat():
+    """Backward-compatible: delegates to default broker's task."""
+    from .broker_config import DEFAULT_BROKER
+    return _base_sync_recent_trades_rest(DEFAULT_BROKER)
+
+
+@shared_task(name="save_intelligence_snapshot")
+def save_intelligence_snapshot_compat(asset: str, report_data: dict):
+    """Backward-compatible: delegates to default broker's task."""
+    from .broker_config import DEFAULT_BROKER
+    return _base_save_intelligence_snapshot(DEFAULT_BROKER, asset, report_data)
+
+
+# ===========================================================================
+# HELPER: Get task name for a broker
+# ===========================================================================
+
+def get_broker_task_name(broker: str, task_type: str) -> str:
+    """
+    Get the dynamically registered task name for a broker.
+
+    Examples:
+        get_broker_task_name("binance", "sync_exchange_structure")
+        → "binance:sync_exchange_structure"
+
+        get_broker_task_name("bybit", "sync_open_interest")
+        → "bybit:sync_open_interest"
+    """
+    return f"{broker}:{task_type}"
 
 
 # ---------------------------------------------------------------------------

@@ -58,6 +58,14 @@ MIDDLEWARE = [
     "django.contrib.sites.middleware.CurrentSiteMiddleware",
 ]
 CORS_ALLOW_ALL_ORIGINS = True
+# CSRF settings:
+# - Django Ninja API (/api/) is exempted (uses JWT Bearer tokens, not cookies)
+# - Django templates use standard cookie-based CSRF
+CSRF_TRUSTED_ORIGINS = env.list(
+    "CSRF_TRUSTED_ORIGINS",
+    default=["http://localhost:4321", "http://localhost:8000"],
+)
+
 
 ROOT_URLCONF = "config.urls"
 
@@ -303,6 +311,30 @@ LOGGING = {
 
 
 AUTH_USER_MODEL = "users.User"
+
+# Login URL for @login_required redirects (Django template pages)
+LOGIN_URL = "/accounts/login/"
+
+# Redirect after successful login
+LOGIN_REDIRECT_URL = "/accounts/profile/"
+
+# ---------------------------------------------------------------------------
+# Ninja JWT Configuration
+# Access token: 1 hour (longer for SPA dashboards that don't want frequent refreshes)
+# Refresh token: 7 days
+# ---------------------------------------------------------------------------
+from datetime import timedelta
+
+NINJA_JWT = {
+    "ACCESS_TOKEN_LIFETIME": timedelta(hours=1),
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
+    "ROTATE_REFRESH_TOKENS": False,
+    "BLACKLIST_AFTER_ROTATION": False,
+    "UPDATE_LAST_LOGIN": True,
+    "ALGORITHM": "HS256",
+    "SIGNING_KEY": SECRET_KEY,
+}
+
 
 
 BINANCE_API_KEY = env("T_BINANCE_API_KEY", default="")

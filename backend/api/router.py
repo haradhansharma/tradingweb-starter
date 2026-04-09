@@ -20,6 +20,9 @@ from apps.common.broker_config import (
     get_available_brokers,
 )
 
+# Import the auth router
+from api.auth_router import auth_router
+
 # Import the shared API instance (NinjaAPI)
 api = NinjaAPI(
     title="WebTrading Options Intelligence API",
@@ -180,4 +183,8 @@ async def list_brokers(request):
 
 api.add_router("/brokers", broker_router)
 
+# =============================================================================
+# AUTH ROUTER (JWT registration, login, profile, credentials)
+# =============================================================================
 
+api.add_router("/auth", auth_router)

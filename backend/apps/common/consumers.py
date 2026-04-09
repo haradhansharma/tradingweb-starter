@@ -17,7 +17,7 @@ import asyncio
 import logging
 from channels.generic.websocket import AsyncWebsocketConsumer
 
-from .broker_config import DEFAULT_BROKER, ws_group_name, ws_global_group, redis_key
+from .broker_config import DEFAULT_BROKER, ws_group_name, ws_global_group, ws_universal_group, redis_key
 from django.conf import settings
 
 logger = logging.getLogger("market.consumer")
@@ -47,9 +47,14 @@ class MarketConsumer(AsyncWebsocketConsumer):
         self.subscribed_groups = set()
         self.heartbeat_task = asyncio.create_task(self._heartbeat_loop())
 
-        # Auto-join global channels (not per-symbol, no subscribe needed)
-        await self.channel_layer.group_add(ws_global_group(DEFAULT_BROKER, "sessions"), self.channel_name)
-        self.subscribed_groups.add(ws_global_group(DEFAULT_BROKER, "sessions"))
+        # Auto-join universal channels (not per-symbol, no subscribe needed).
+        # Sessions are broker-agnostic (Sydney/Tokyo/London/NY are the same
+        # regardless of broker), so we use a universal group instead of
+        # broker-specific groups. This ensures sessions reach the frontend
+        # from ANY running orchestrator (Binance, Bybit, etc.).
+        universal_sessions_group = ws_universal_group("sessions")
+        await self.channel_layer.group_add(universal_sessions_group, self.channel_name)
+        self.subscribed_groups.add(universal_sessions_group)
 
         logger.info(f"Frontend WS Connected: {self.channel_name}")
 

@@ -227,6 +227,8 @@ docker compose exec t_redis redis-cli flushall
 # Flush all Redis databases (DB0-DB3)
 docker exec -it <redis_container_name> redis-cli FLUSHALL
 
+docker exec -it t_redis redis-cli FLUSHALL
+
 # Or flush a specific database only:
 # DB0 (cache) - where active underlyings are stored
 docker exec -it <redis_container_name> redis-cli -n 0 FLUSHDB

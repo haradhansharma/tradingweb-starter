@@ -1,8 +1,8 @@
 """
 Futures Streamer — Management Command
 =======================================
-Django management command to start the Binance Futures WebSocket streamer.
-Runs alongside binance_streamer.py (Options WS) as a separate Docker container.
+Django management command to start the Futures WebSocket streamer.
+Runs alongside options_streamer.py as a separate Docker container.
 
 This command:
   1. Reads top underlyings from Redis
@@ -22,6 +22,7 @@ from django.core.management.base import BaseCommand
 
 from apps.common.futures_orchestrator import FuturesOrchestrator
 from apps.common.assets import get_assets_sync
+from apps.common.broker_config import DEFAULT_BROKER
 from django.conf import settings
 
 logger = logging.getLogger("futures.streamer")
@@ -30,7 +31,7 @@ SHUTDOWN_TIMEOUT_SEC = 5
 
 
 class Command(BaseCommand):
-    help = "Start Binance Futures kline WebSocket streamer with indicator calculations"
+    help = "Start Futures kline WebSocket streamer with indicator calculations"
 
     def handle(self, *args, **options):
         # 1. Read the top underlyings list from Redis
@@ -49,7 +50,7 @@ class Command(BaseCommand):
         )
 
         # 2. Create orchestrator
-        orchestrator = FuturesOrchestrator()
+        orchestrator = FuturesOrchestrator(broker=DEFAULT_BROKER)
 
         # 3. Create event loop
         loop = asyncio.new_event_loop()

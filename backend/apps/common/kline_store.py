@@ -214,7 +214,7 @@ class KlineStore:
 
         # Use pipeline for batch write
         pipe = self.cache.pipeline()
-        key = f"kline:{symbol}:{interval}:history"
+        key = f"kline:{self.broker}:{symbol}:{interval}:history"
 
         for candle in candles:
             # score = open_time, value = candle JSON
@@ -257,8 +257,8 @@ class KlineStore:
             return None
 
         is_complete = k_data.get("x", False)
-        key_current = f"kline:{symbol}:1m:current"
-        key_history = f"kline:{symbol}:1m:history"
+        key_current = f"kline:{self.broker}:{symbol}:1m:current"
+        key_history = f"kline:{self.broker}:{symbol}:1m:history"
 
         if not is_complete:
             # Update in-progress candle
@@ -303,10 +303,10 @@ class KlineStore:
 
         Returns list of candle dicts sorted by open_time ascending.
         """
-        key = f"kline:{symbol}:{interval}:history"
+        key = f"kline:{self.broker}:{symbol}:{interval}:history"
         if interval == "1m":
             # Also include the current in-progress candle if it exists
-            raw_current = await self.cache.get(f"kline:{symbol}:1m:current")
+            raw_current = await self.cache.get(f"kline:{self.broker}:{symbol}:1m:current")
         else:
             raw_current = None
 
@@ -370,7 +370,7 @@ class KlineStore:
             if not aggregated:
                 continue
 
-            key = f"kline:{symbol}:{tf}:history"
+            key = f"kline:{self.broker}:{symbol}:{tf}:history"
             # Clear existing and re-populate
             pipe.delete(key)
             for candle in aggregated:
@@ -410,7 +410,7 @@ class KlineStore:
             bucket_end = bucket_start + bucket_ms
 
             # Fetch all 1m candles in this bucket
-            key_1m = f"kline:{symbol}:1m:history"
+            key_1m = f"kline:{self.broker}:{symbol}:1m:history"
             raw_candles = await self.cache.zrangebyscore(
                 key_1m, bucket_start, bucket_end - 1
             )
@@ -435,7 +435,7 @@ class KlineStore:
                 continue
 
             agg_candle = aggregated[0]
-            key_tf = f"kline:{symbol}:{tf}:history"
+            key_tf = f"kline:{self.broker}:{symbol}:{tf}:history"
 
             pipe = self.cache.pipeline()
             # ZADD is idempotent — same score overwrites existing value
@@ -458,8 +458,8 @@ class KlineStore:
         """Remove all kline data for a symbol (used when asset is removed)."""
         pipe = self.cache.pipeline()
         for tf in list(TF_MULTIPLIER.keys()):
-            pipe.delete(f"kline:{symbol}:{tf}:history")
-        pipe.delete(f"kline:{symbol}:1m:current")
-        pipe.delete(f"indicators:{symbol}")
+            pipe.delete(f"kline:{self.broker}:{symbol}:{tf}:history")
+        pipe.delete(f"kline:{self.broker}:{symbol}:1m:current")
+        pipe.delete(f"kline:{self.broker}:{symbol}:indicators")
         await pipe.execute()
         logger.info(f"Cleaned up all kline data for {symbol}")

@@ -161,28 +161,6 @@ def redis_global_key(broker: str, key: str) -> str:
     return f"{prefix}:{key}"
 
 
-# def ws_group_name(broker: str, underlying: str, category: str) -> str:
-#     """
-#     Build a broker-namespaced Django Channels group name.
-
-#     Examples:
-#         ws_group_name("binance", "BTCUSDT", "intelligence") → "binance:BTCUSDT_intelligence"
-#         ws_group_name("binance", "BTCUSDT", "indicators")   → "binance:BTCUSDT_indicators"
-#     """
-#     prefix = get_redis_prefix(broker)
-#     return f"{prefix}:{underlying}_{category}".replace("-", "_")
-
-
-# def ws_global_group(broker: str, category: str) -> str:
-#     """
-#     Build a broker-namespaced global Django Channels group name.
-
-#     Examples:
-#         ws_global_group("binance", "sessions") → "binance:_global_sessions"
-#     """
-#     prefix = get_redis_prefix(broker)
-#     return f"{prefix}:_global_{category}"
-
 def ws_group_name(broker: str, underlying: str, category: str) -> str:
     """
     Build a Django Channels group name for per-symbol subscriptions.
@@ -198,12 +176,25 @@ def ws_group_name(broker: str, underlying: str, category: str) -> str:
 
 def ws_global_group(broker: str, category: str) -> str:
     """
-    Build a Django Channels group name for global (non-per-symbol) channels.
+    Build a Django Channels group name for broker-specific global channels.
 
     Example:  ws_global_group("binance", "sessions")
               → "binance_GLOBAL.sessions"
     """
     return f"{broker}_GLOBAL.{category}"
+
+
+def ws_universal_group(category: str) -> str:
+    """
+    Build a broker-AGNOSTIC Django Channels group name.
+
+    Use for data that is identical across all brokers (e.g. market sessions
+    — Sydney, Tokyo, London, NY are the same regardless of broker).
+
+    Example:  ws_universal_group("sessions")
+              → "GLOBAL.sessions"
+    """
+    return f"GLOBAL.{category}"
 
 
 def pubsub_channel(broker: str, underlying: str, category: str) -> str:

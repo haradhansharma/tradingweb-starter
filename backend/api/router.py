@@ -2,7 +2,7 @@
 Market Data Router
 ==================
 All market-related endpoints. Public access (no auth required).
-Uses the shared api instance from api/__init__.py.
+Creates the NinjaAPI instance inline.
 """
 from ninja import NinjaAPI, Router, Query
 import json

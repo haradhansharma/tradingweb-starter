@@ -1,12 +1,15 @@
 from django.contrib.auth.models import AbstractUser
 from django.db import models
 from django.core.exceptions import ValidationError
+from django.utils.translation import gettext_lazy as _
 from cryptography.fernet import Fernet
 from django.conf import settings
 
 
-
 class User(AbstractUser):
+    # Enforce unique email (AbstractUser.email is not unique by default)
+    email = models.EmailField(_("email address"), unique=True)
+
     # Add giant-project essentials now so they are in the DB
     is_verified = models.BooleanField(default=False)
     bio = models.TextField(max_length=500, blank=True)
@@ -31,12 +34,62 @@ class User(AbstractUser):
     def __str__(self):
 
         return self.username
-    
-    class Meta:
-        app_label = 'users'
-        # verbose_name = "U"
-        # verbose_name_plural = "Custom Sites"
 
+
+class OTPVerification(models.Model):
+    """
+    One-Time Password verification for user registration and email confirmation.
+
+    Lifecycle:
+      1. User registers -> OTP created, sent to user email, user is is_active=False
+      2. User submits OTP -> if valid, user.is_active=True, user.is_verified=True
+      3. OTP expires after OTP_EXPIRY_SECONDS
+      4. User can request resend (old OTP invalidated, new one created)
+    """
+
+    PURPOSE_CHOICES = [
+        ("registration", "Registration Verification"),
+        ("password_reset", "Password Reset"),
+        ("email_change", "Email Change Verification"),
+    ]
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="otp_codes",
+    )
+    code = models.CharField(max_length=6, db_index=True)
+    purpose = models.CharField(max_length=20, choices=PURPOSE_CHOICES, default="registration")
+    is_used = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    attempts = models.PositiveIntegerField(default=0)
+    max_attempts = models.PositiveIntegerField(default=5)
+
+    class Meta:
+        verbose_name = "OTP Verification"
+        verbose_name_plural = "OTP Verifications"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.user.username} — {self.purpose} — {'used' if self.is_used else 'active'}"
+
+    @property
+    def is_expired(self):
+        from django.utils import timezone
+        return timezone.now() >= self.expires_at
+
+    @property
+    def is_valid(self):
+        return not self.is_used and not self.is_expired and self.attempts < self.max_attempts
+
+    def mark_used(self):
+        self.is_used = True
+        self.save(update_fields=["is_used"])
+
+    def increment_attempts(self):
+        self.attempts += 1
+        self.save(update_fields=["attempts"])
 
 
 class BrokerCredential(models.Model):
@@ -92,7 +145,6 @@ class BrokerCredential(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        app_label = 'users'
         unique_together = ("user", "broker", "label")
         verbose_name = "Broker Credential"
         verbose_name_plural = "Broker Credentials"

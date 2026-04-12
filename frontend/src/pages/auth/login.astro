@@ -3,13 +3,17 @@
  * Login Page — MarketPulse
  * =========================
  * JWT-based login for the Astro SPA.
+ * Handles:
+ *   - Normal login (verified user)
+ *   - Unverified account (redirects to OTP verification)
+ *   - Forgot password flow
  * On success, redirects to the dashboard.
  */
 import AuthLayout from '../../layouts/AuthLayout.astro';
 ---
 
 <AuthLayout title="Sign In — MarketPulse">
-  <div x-data="authForm()" x-init="init()">
+  <div x-data="authPage()" x-init="init()">
     <!-- Logo -->
     <div class="text-center mb-8">
       <h1 class="text-2xl font-bold text-blue-400" style="font-family: 'Space Grotesk', sans-serif;">
@@ -18,66 +22,190 @@ import AuthLayout from '../../layouts/AuthLayout.astro';
       <p class="text-sm text-gray-500 mt-1">Options Intelligence Dashboard</p>
     </div>
 
-    <!-- Error -->
-    <div
-      x-show="error"
-      x-transition
-      class="mb-4 p-3 bg-red-900/30 border border-red-800 rounded-lg text-sm text-red-300"
-      x-text="error"
-    ></div>
+    <!-- Login Form -->
+    <div x-show="!showForgotPassword">
+      <!-- Error -->
+      <div
+        x-show="error"
+        x-transition
+        class="mb-4 p-3 bg-red-900/30 border border-red-800 rounded-lg text-sm text-red-300"
+        x-text="error"
+      ></div>
 
-    <!-- Form -->
-    <form @submit.prevent="handleLogin()">
-      <div class="mb-4">
-        <label class="block text-xs font-medium text-gray-400 uppercase tracking-wider mb-1.5">Username</label>
-        <input
-          type="text"
-          x-model="username"
-          autocomplete="username"
-          required
-          class="w-full px-3.5 py-2.5 bg-[#0f1117] border border-[#2a2d3a] rounded-lg text-sm text-gray-200 outline-none focus:border-blue-500 transition-colors"
-          placeholder="Enter your username"
-        >
-      </div>
-
-      <div class="mb-6">
-        <label class="block text-xs font-medium text-gray-400 uppercase tracking-wider mb-1.5">Password</label>
-        <input
-          type="password"
-          x-model="password"
-          autocomplete="current-password"
-          required
-          class="w-full px-3.5 py-2.5 bg-[#0f1117] border border-[#2a2d3a] rounded-lg text-sm text-gray-200 outline-none focus:border-blue-500 transition-colors"
-          placeholder="Enter your password"
-        >
-      </div>
-
-      <button
-        type="submit"
-        :disabled="loading"
-        class="w-full py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-semibold rounded-lg transition-colors"
+      <!-- Unverified account warning -->
+      <div
+        x-show="showVerifyWarning"
+        x-transition
+        class="mb-4 p-3 bg-amber-900/30 border border-amber-700 rounded-lg text-sm text-amber-300"
       >
-        <span x-show="!loading">Sign In</span>
-        <span x-show="loading" class="flex items-center justify-center gap-2">
-          <svg class="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
-            <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="32" stroke-dashoffset="32" stroke-linecap="round"/>
+        <div class="flex items-start gap-2">
+          <svg class="w-4 h-4 mt-0.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+            <line x1="12" y1="9" x2="12" y2="13"/>
+            <line x1="12" y1="17" x2="12.01" y2="17"/>
           </svg>
-          Signing in...
-        </span>
-      </button>
-    </form>
+          <div>
+            <p class="font-medium">Account not verified</p>
+            <p class="mt-0.5 opacity-80" x-text="error"></p>
+            <button
+              type="button"
+              @click="goToVerify()"
+              class="mt-2 text-xs font-medium bg-amber-600/20 hover:bg-amber-600/30 border border-amber-600/40 px-2.5 py-1 rounded-md transition-colors"
+            >
+              Verify my account
+            </button>
+          </div>
+        </div>
+      </div>
 
-    <!-- Footer -->
-    <p class="text-center text-sm text-gray-500 mt-6">
-      Don't have an account?
-      <a href="/auth/register" class="text-blue-400 hover:text-blue-300 ml-1">Create one</a>
-    </p>
+      <!-- Login Form -->
+      <form @submit.prevent="handleLogin()">
+        <div class="mb-4">
+          <label class="block text-xs font-medium text-gray-400 uppercase tracking-wider mb-1.5">Username</label>
+          <input
+            type="text"
+            x-model="username"
+            autocomplete="username"
+            required
+            class="w-full px-3.5 py-2.5 bg-[#0f1117] border border-[#2a2d3a] rounded-lg text-sm text-gray-200 outline-none focus:border-blue-500 transition-colors"
+            placeholder="Enter your username"
+          >
+        </div>
+
+        <div class="mb-6">
+          <label class="block text-xs font-medium text-gray-400 uppercase tracking-wider mb-1.5">Password</label>
+          <input
+            type="password"
+            x-model="password"
+            autocomplete="current-password"
+            required
+            class="w-full px-3.5 py-2.5 bg-[#0f1117] border border-[#2a2d3a] rounded-lg text-sm text-gray-200 outline-none focus:border-blue-500 transition-colors"
+            placeholder="Enter your password"
+          >
+        </div>
+
+        <button
+          type="submit"
+          :disabled="loading"
+          class="w-full py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-semibold rounded-lg transition-colors"
+        >
+          <span x-show="!loading">Sign In</span>
+          <span x-show="loading" class="flex items-center justify-center gap-2">
+            <svg class="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
+              <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="32" stroke-dashoffset="32" stroke-linecap="round"/>
+            </svg>
+            Signing in...
+          </span>
+        </button>
+      </form>
+
+      <!-- Forgot password link -->
+      <div class="text-center mt-4">
+        <button
+          type="button"
+          @click="showForgotPassword = true"
+          class="text-sm text-gray-500 hover:text-gray-300 transition-colors"
+        >
+          Forgot your password?
+        </button>
+      </div>
+
+      <!-- Register link -->
+      <p class="text-center text-sm text-gray-500 mt-4 pt-4 border-t border-[#2a2d3a]">
+        Don't have an account?
+        <a href="/auth/register" class="text-blue-400 hover:text-blue-300 ml-1">Create one</a>
+      </p>
+    </div>
+
+    <!-- Forgot Password Form -->
+    <div x-show="showForgotPassword" x-transition>
+      <!-- Back button -->
+      <button
+        type="button"
+        @click="showForgotPassword = false"
+        class="flex items-center gap-1.5 text-sm text-gray-400 hover:text-gray-200 mb-6 transition-colors"
+      >
+        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <line x1="19" y1="12" x2="5" y2="12"/>
+          <polyline points="12 19 5 12 12 5"/>
+        </svg>
+        Back to sign in
+      </button>
+
+      <!-- Success message -->
+      <div
+        x-show="forgotSuccess"
+        x-transition
+        class="mb-4 p-3 bg-emerald-900/30 border border-emerald-800 rounded-lg text-sm text-emerald-300"
+      >
+        <div class="flex items-center gap-2">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+            <path d="M9 12l2 2 4-4"/>
+            <path d="M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z"/>
+          </svg>
+          <span x-text="forgotSuccess"></span>
+        </div>
+      </div>
+
+      <!-- Error message -->
+      <div
+        x-show="forgotError"
+        x-transition
+        class="mb-4 p-3 bg-red-900/30 border border-red-800 rounded-lg text-sm text-red-300"
+        x-text="forgotError"
+      ></div>
+
+      <p class="text-sm text-gray-400 mb-4">
+        Enter your username and we'll send a verification code to reset your password.
+      </p>
+
+      <form @submit.prevent="handleForgotPassword()">
+        <div class="mb-6">
+          <label class="block text-xs font-medium text-gray-400 uppercase tracking-wider mb-1.5">Username</label>
+          <input
+            type="text"
+            x-model="forgotUsername"
+            required
+            class="w-full px-3.5 py-2.5 bg-[#0f1117] border border-[#2a2d3a] rounded-lg text-sm text-gray-200 outline-none focus:border-blue-500 transition-colors"
+            placeholder="Enter your username"
+          >
+        </div>
+
+        <button
+          type="submit"
+          :disabled="forgotLoading"
+          class="w-full py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-semibold rounded-lg transition-colors"
+        >
+          <span x-show="!forgotLoading">Send Reset Code</span>
+          <span x-show="forgotLoading" class="flex items-center justify-center gap-2">
+            <svg class="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
+              <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="32" stroke-dashoffset="32" stroke-linecap="round"/>
+            </svg>
+            Sending...
+          </span>
+        </button>
+      </form>
+
+      <!-- Link to reset password page -->
+      <div
+        x-show="forgotSuccess"
+        x-transition
+        class="text-center mt-4"
+      >
+        <a
+          :href="'/auth/reset-password?username=' + encodeURIComponent(forgotUsername)"
+          class="text-sm text-blue-400 hover:text-blue-300 transition-colors"
+        >
+          Enter reset code
+        </a>
+      </div>
+    </div>
   </div>
 </AuthLayout>
 
 <script>
   document.addEventListener('alpine:init', () => {
-    Alpine.data('authForm', () => {
+    Alpine.data('authPage', () => {
       const { getAuthStore } = getAlpineStore();
 
       return {
@@ -85,23 +213,62 @@ import AuthLayout from '../../layouts/AuthLayout.astro';
         password: '',
         loading: false,
         error: null,
+        showVerifyWarning: false,
+
+        // Forgot password
+        showForgotPassword: false,
+        forgotUsername: '',
+        forgotLoading: false,
+        forgotError: null,
+        forgotSuccess: null,
 
         init() {
-          // If already authenticated, redirect
+          // If already authenticated, redirect to dashboard
+          const auth = getAuthStore();
+          if (auth.isAuthenticated) {
+            window.location.href = '/';
+          }
         },
 
         async handleLogin() {
           this.loading = true;
           this.error = null;
+          this.showVerifyWarning = false;
 
           const auth = getAuthStore();
-          const success = await auth.login(this.username, this.password);
+          const result = await auth.login(this.username, this.password);
 
-          if (success) {
+          if (result.success) {
             window.location.href = '/';
-          } else {
-            this.error = auth.error || 'Login failed. Please try again.';
+          } else if (result.requiresVerification) {
+            // Account not verified — show warning
+            this.error = result.error;
+            this.showVerifyWarning = true;
             this.loading = false;
+          } else {
+            this.error = result.error || 'Login failed. Please try again.';
+            this.loading = false;
+          }
+        },
+
+        goToVerify() {
+          window.location.href = `/auth/verify-otp?username=${encodeURIComponent(this.username)}`;
+        },
+
+        async handleForgotPassword() {
+          this.forgotLoading = true;
+          this.forgotError = null;
+          this.forgotSuccess = null;
+
+          const auth = getAuthStore();
+          const result = await auth.forgotPassword(this.forgotUsername);
+
+          this.forgotLoading = false;
+
+          if (result.success) {
+            this.forgotSuccess = result.message;
+          } else {
+            this.forgotError = result.message;
           }
         },
       };

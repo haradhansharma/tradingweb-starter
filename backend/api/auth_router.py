@@ -4,11 +4,15 @@ User API Router
 Handles authentication and user-specific endpoints.
 
 Auth flow:
-  - POST /api/auth/register  → create account
-  - POST /api/auth/pair      → obtain JWT pair (access + refresh)
-  - POST /api/auth/refresh   → refresh access token
-  - POST /api/auth/verify    → verify token validity
-  - GET  /api/auth/me        → current user profile (JWT required)
+  1. POST /api/auth/register   → create account (is_active=False), send OTP email
+  2. POST /api/auth/verify-otp  → verify OTP code, activate account
+  3. POST /api/auth/resend-otp  → resend OTP code (rate limited)
+  4. POST /api/auth/pair        → obtain JWT pair (access + refresh) — requires is_active
+  5. POST /api/auth/refresh     → refresh access token
+  6. GET  /api/auth/me          → current user profile (JWT required)
+  7. POST /api/auth/change-password → change password (JWT required)
+  8. POST /api/auth/forgot-password → request password reset OTP (public)
+  9. POST /api/auth/reset-password  → reset password with OTP (public)
 
 Broker credentials (JWT required):
   - GET    /api/auth/credentials          → list user's credentials
@@ -17,20 +21,18 @@ Broker credentials (JWT required):
   - DELETE /api/auth/credentials/{id}     → delete credentials
 """
 
+import logging
 from datetime import timedelta
 from typing import Optional
 
 from django.conf import settings
-from django.contrib.auth import get_user_model
+from django.contrib.auth import get_user_model, authenticate
 from django.db import IntegrityError
 
-from ninja import NinjaAPI, Router, Schema
-from ninja.security import HttpBearer
-from pydantic import field_validator, model_validator
+from ninja import Router, Schema
+from pydantic import field_validator
 
-from ninja_jwt.controller import NinjaJWTDefaultController
 from ninja_jwt.authentication import JWTAuth
-from ninja_jwt.tokens import RefreshToken, AccessToken
 from ninja_jwt.schema import (
     TokenObtainPairInputSchema,
     TokenObtainPairOutputSchema,
@@ -39,9 +41,11 @@ from ninja_jwt.schema import (
 )
 
 from users.models import BrokerCredential
+from users.otp_utils import create_otp, send_otp_email, verify_otp
 from common.broker_config import BROKER_CONFIGS
 
 User = get_user_model()
+logger = logging.getLogger("django.request")
 
 # ─── JWT Auth backend for protecting endpoints ───
 
@@ -87,15 +91,43 @@ class RegisterInputSchema(Schema):
 
 
 class RegisterOutputSchema(Schema):
-    """Registration success response."""
+    """Registration success response — user needs OTP verification."""
     id: int
     username: str
     email: str
+    message: str
+
+
+class VerifyOtpInputSchema(Schema):
+    """OTP verification input."""
+    username: str
+    code: str
+
+    @field_validator("code")
+    @classmethod
+    def code_format(cls, v: str) -> str:
+        v = v.strip()
+        if not v.isdigit() or len(v) != 6:
+            raise ValueError("OTP must be a 6-digit number")
+        return v
+
+
+class ResendOtpInputSchema(Schema):
+    """Resend OTP input."""
+    username: str
 
 
 class MessageSchema(Schema):
     """Generic message response."""
     message: str
+
+
+class VerifyOtpOutputSchema(Schema):
+    """OTP verification result."""
+    success: bool
+    message: str
+    reason: Optional[str] = None
+    remaining_attempts: Optional[int] = None
 
 
 class UserOutputSchema(Schema):
@@ -126,6 +158,47 @@ class UserUpdateInputSchema(Schema):
     def valid_risk(cls, v: Optional[str]) -> Optional[str]:
         if v is not None and v not in ("conservative", "moderate", "aggressive"):
             raise ValueError("Must be conservative, moderate, or aggressive")
+        return v
+
+
+class ChangePasswordInputSchema(Schema):
+    """Change password input (requires current password)."""
+    current_password: str
+    new_password: str
+
+    @field_validator("new_password")
+    @classmethod
+    def password_strength(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError("New password must be at least 8 characters")
+        return v
+
+
+class ForgotPasswordInputSchema(Schema):
+    """Forgot password — request OTP by username or email."""
+    username: Optional[str] = None
+    email: Optional[str] = None
+
+
+class ResetPasswordInputSchema(Schema):
+    """Reset password with OTP."""
+    username: str
+    code: str
+    new_password: str
+
+    @field_validator("code")
+    @classmethod
+    def code_format(cls, v: str) -> str:
+        v = v.strip()
+        if not v.isdigit() or len(v) != 6:
+            raise ValueError("OTP must be a 6-digit number")
+        return v
+
+    @field_validator("new_password")
+    @classmethod
+    def password_strength(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError("New password must be at least 8 characters")
         return v
 
 
@@ -173,7 +246,7 @@ auth_router = Router(tags=["auth"])
 
 
 # =============================================================================
-# REGISTRATION
+# REGISTRATION (creates inactive user, sends OTP)
 # =============================================================================
 
 @auth_router.post(
@@ -182,7 +255,11 @@ auth_router = Router(tags=["auth"])
     auth=None,
 )
 def register(request, data: RegisterInputSchema):
-    """Create a new user account. Returns user info on success."""
+    """
+    Create a new user account (inactive until OTP verified).
+    Sends a 6-digit verification code to the user's email.
+    Returns user info on success.
+    """
     # Check if registration is allowed
     from common.models import SiteSettings
     try:
@@ -193,36 +270,145 @@ def register(request, data: RegisterInputSchema):
     except Exception:
         pass
 
+    # Explicit duplicate checks (email is not unique by default in AbstractUser)
+    if User.objects.filter(username=data.username).exists():
+        return 400, {"message": "Username already exists."}
+    if User.objects.filter(email=data.email).exists():
+        return 400, {"message": "Email already exists."}
+
     try:
         user = User.objects.create_user(
             username=data.username,
             email=data.email,
             password=data.password,
+            is_active=False,  # Inactive until OTP verified
         )
-        return 201, {
-            "id": user.id,
-            "username": user.username,
-            "email": user.email,
-        }
     except IntegrityError:
         return 400, {"message": "Username or email already exists."}
 
+    # Generate and send OTP
+    try:
+        otp = create_otp(user, purpose="registration")
+        send_otp_email(user, otp)
+        logger.info(f"OTP sent to {user.email} for registration of {user.username}")
+    except ValueError as e:
+        # Rate limit hit — delete user and report
+        user.delete()
+        return 400, {"message": str(e)}
+    except Exception as e:
+        logger.error(f"Failed to send OTP email: {e}")
+        user.delete()
+        return 400, {"message": "Failed to send verification email. Please try again later."}
+
+    return 201, {
+        "id": user.id,
+        "username": user.username,
+        "email": user.email,
+        "message": "Verification code sent to your email. Please check your inbox.",
+    }
+
 
 # =============================================================================
-# TOKEN OBTAIN (uses ninja_jwt built-in schema)
+# OTP VERIFICATION (activates user account)
+# =============================================================================
+
+@auth_router.post(
+    "/verify-otp",
+    response={200: VerifyOtpOutputSchema, 400: VerifyOtpOutputSchema},
+    auth=None,
+)
+def verify_otp_endpoint(request, data: VerifyOtpInputSchema):
+    """
+    Verify OTP code to activate user account.
+    On success: user.is_active = True, user.is_verified = True.
+    """
+    try:
+        user = User.objects.get(username=data.username.lower())
+    except User.DoesNotExist:
+        return 400, VerifyOtpOutputSchema(
+            success=False,
+            message="User not found.",
+            reason="user_not_found",
+        )
+
+    if user.is_active and user.is_verified:
+        return 200, VerifyOtpOutputSchema(
+            success=True,
+            message="Account is already verified. You can sign in.",
+        )
+
+    result = verify_otp(user, data.code, purpose="registration")
+    return 200 if result["success"] else 400, VerifyOtpOutputSchema(**result)
+
+
+# =============================================================================
+# RESEND OTP (rate limited)
+# =============================================================================
+
+@auth_router.post(
+    "/resend-otp",
+    response={200: MessageSchema, 400: MessageSchema},
+    auth=None,
+)
+def resend_otp_endpoint(request, data: ResendOtpInputSchema):
+    """
+    Resend OTP verification code.
+    Rate limited to 3 requests per hour.
+    """
+    try:
+        user = User.objects.get(username=data.username.lower())
+    except User.DoesNotExist:
+        return 400, {"message": "User not found."}
+
+    if user.is_active and user.is_verified:
+        return 400, {"message": "Account is already verified. You can sign in."}
+
+    try:
+        otp = create_otp(user, purpose="registration")
+        sent = send_otp_email(user, otp)
+        if sent:
+            return 200, {"message": "New verification code sent to your email."}
+        else:
+            return 400, {"message": "Failed to send verification email. Please try again."}
+    except ValueError as e:
+        return 400, {"message": str(e)}
+    except Exception as e:
+        logger.error(f"Resend OTP failed: {e}")
+        return 400, {"message": "An error occurred. Please try again later."}
+
+
+# =============================================================================
+# TOKEN OBTAIN (login — requires active user)
 # =============================================================================
 
 @auth_router.post(
     "/pair",
-    response=TokenObtainPairOutputSchema,
+    response={200: TokenObtainPairOutputSchema, 403: MessageSchema},
     auth=None,
 )
 def obtain_token(request, user_token: TokenObtainPairInputSchema):
     """
     Obtain JWT token pair.
     Send { "username": "...", "password": "..." }.
-    Returns { "access": "...", "refresh": "...", "username": "..." }.
+    Returns { "access": "...", "refresh": "..." }.
+
+    Uses Django's authenticate() via ninja_jwt's built-in mechanism.
+    For inactive (unverified) users, returns a helpful 403 message
+    before even attempting password authentication.
     """
+    # Pre-check: if user exists but is not active, give helpful message
+    # (we do NOT check the password here — that would bypass Django conventions)
+    try:
+        user = User.objects.get(username=user_token.username)
+        if not user.is_active:
+            return 403, {
+                "message": "Account is not verified. Please check your email for the verification code.",
+                "requires_verification": True,
+            }
+    except User.DoesNotExist:
+        pass  # User doesn't exist — let authenticate() handle it
+
+    # Use ninja_jwt's built-in authentication (calls Django's authenticate() internally)
     user_token.check_user_authentication_rule()
     return user_token.to_response_schema()
 
@@ -288,6 +474,95 @@ def update_me(request, data: UserUpdateInputSchema):
         "notify_whale_activity": user.notify_whale_activity,
         "notify_market_shifts": user.notify_market_shifts,
     }
+
+
+# =============================================================================
+# CHANGE PASSWORD (JWT required)
+# =============================================================================
+
+@auth_router.post(
+    "/change-password",
+    response={200: MessageSchema, 400: MessageSchema},
+    auth=jwt_auth,
+)
+def change_password(request, data: ChangePasswordInputSchema):
+    """Change the authenticated user's password. Requires current password."""
+    user = request.auth
+
+    if not user.check_password(data.current_password):
+        return 400, {"message": "Current password is incorrect."}
+
+    user.set_password(data.new_password)
+    user.save(update_fields=["password"])
+
+    return 200, {"message": "Password changed successfully."}
+
+
+# =============================================================================
+# FORGOT PASSWORD (request OTP)
+# =============================================================================
+
+@auth_router.post(
+    "/forgot-password",
+    response={200: MessageSchema, 400: MessageSchema},
+    auth=None,
+)
+def forgot_password(request, data: ForgotPasswordInputSchema):
+    """
+    Request a password reset OTP.
+    User identifies by username or email.
+    Always returns 200 to avoid user enumeration.
+    """
+    user = None
+    if data.username:
+        try:
+            user = User.objects.get(username=data.username.lower(), is_active=True)
+        except User.DoesNotExist:
+            pass
+    elif data.email:
+        try:
+            user = User.objects.get(email=data.email.lower(), is_active=True)
+        except User.DoesNotExist:
+            pass
+
+    if user:
+        try:
+            otp = create_otp(user, purpose="password_reset")
+            send_otp_email(user, otp)
+        except Exception as e:
+            logger.error(f"Forgot password OTP failed: {e}")
+
+    # Always return 200 to prevent user enumeration
+    return 200, {
+        "message": "If an account with that username/email exists, a verification code has been sent.",
+    }
+
+
+# =============================================================================
+# RESET PASSWORD (with OTP)
+# =============================================================================
+
+@auth_router.post(
+    "/reset-password",
+    response={200: MessageSchema, 400: MessageSchema},
+    auth=None,
+)
+def reset_password(request, data: ResetPasswordInputSchema):
+    """Reset password using OTP verification code."""
+    try:
+        user = User.objects.get(username=data.username.lower(), is_active=True)
+    except User.DoesNotExist:
+        return 400, {"message": "User not found."}
+
+    result = verify_otp(user, data.code, purpose="password_reset")
+    if not result["success"]:
+        return 400, MessageSchema(message=result["message"])
+
+    # OTP is valid — set new password
+    user.set_password(data.new_password)
+    user.save(update_fields=["password"])
+
+    return 200, {"message": "Password reset successfully. You can now sign in with your new password."}
 
 
 # =============================================================================

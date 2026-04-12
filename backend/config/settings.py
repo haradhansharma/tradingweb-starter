@@ -176,13 +176,14 @@ REDIS_PUBSUB_URL = f"redis://{REDIS_HOST}:{REDIS_PORT}/3"
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
 STATIC_URL = "/static/"
+STATIC_ROOT = os.path.join(BASE_DIR, "static")
 
-if DEBUG:
-    STATICFILES_DIRS = [
-        os.path.join(BASE_DIR, "static"),
-    ]
-else:
-    STATIC_ROOT = os.path.join(BASE_DIR, "static")
+# if DEBUG:
+#     STATICFILES_DIRS = [
+#         os.path.join(BASE_DIR, "static"),
+#     ]
+# else:
+#     STATIC_ROOT = os.path.join(BASE_DIR, "static")
 
 MEDIA_URL = "/media/"
 MEDIA_ROOT = os.path.join(BASE_DIR, "media")
@@ -317,6 +318,15 @@ LOGIN_URL = "/accounts/login/"
 
 # Redirect after successful login
 LOGIN_REDIRECT_URL = "/accounts/profile/"
+
+# ---------------------------------------------------------------------------
+# OTP Configuration
+# ---------------------------------------------------------------------------
+OTP_EXPIRY_SECONDS = env("OTP_EXPIRY_SECONDS", default=600, cast=int)   # 10 minutes
+OTP_MAX_ATTEMPTS = env("OTP_MAX_ATTEMPTS", default=5, cast=int)          # 5 wrong attempts
+OTP_RATE_LIMIT = env("OTP_RATE_LIMIT", default=3, cast=int)              # 3 sends per hour
+
+
 
 # ---------------------------------------------------------------------------
 # Ninja JWT Configuration

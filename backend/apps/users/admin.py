@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 
-from users.models import User, BrokerCredential
+from .models import User, BrokerCredential, OTPVerification
 
 
 @admin.register(User)
@@ -88,3 +88,33 @@ class BrokerCredentialAdmin(admin.ModelAdmin):
     def has_module_permission(self, request):
         """Only staff can see this module in admin index."""
         return request.user.is_staff
+
+
+@admin.register(OTPVerification)
+class OTPVerificationAdmin(admin.ModelAdmin):
+    """Admin view for OTP verification codes."""
+
+    list_display = [
+        "id",
+        "user",
+        "code",
+        "purpose",
+        "is_used",
+        "attempts",
+        "max_attempts",
+        "created_at",
+        "expires_at",
+    ]
+    list_filter = ["purpose", "is_used"]
+    search_fields = ["user__username", "user__email", "code"]
+    readonly_fields = ["created_at", "code"]
+
+    def get_queryset(self, request):
+        """Only superusers can see OTP codes."""
+        qs = super().get_queryset(request)
+        if not request.user.is_superuser:
+            return qs.none()
+        return qs
+
+    def has_module_permission(self, request):
+        return request.user.is_superuser

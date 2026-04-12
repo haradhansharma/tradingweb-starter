@@ -5,14 +5,21 @@
  *
  * Architecture:
  *   - Uses Django Ninja JWT for token-based auth
+ *   - OTP verification required for new registrations
  *   - Stores tokens in localStorage (access + refresh)
  *   - Auto-refreshes access token before expiry
  *   - Provides reactive state for Alpine.js UI bindings
  *
- * Token flow:
- *   POST /api/auth/pair      → { access, refresh, username }
- *   POST /api/auth/refresh   → { access }
- *   GET  /api/auth/me        → { user profile } (Bearer: <access>)
+ * Auth flow:
+ *   POST /api/auth/register   → create inactive user + send OTP
+ *   POST /api/auth/verify-otp  → verify OTP, activate account
+ *   POST /api/auth/resend-otp  → resend OTP (rate limited)
+ *   POST /api/auth/pair        → obtain JWT tokens (requires active user)
+ *   POST /api/auth/refresh     → refresh access token
+ *   GET  /api/auth/me          → user profile (Bearer: <access>)
+ *   POST /api/auth/change-password → change password (JWT required)
+ *   POST /api/auth/forgot-password → request password reset OTP
+ *   POST /api/auth/reset-password  → reset password with OTP
  */
 
 // ── Types ──
@@ -131,13 +138,112 @@ export function createAuthStore() {
       return state.user?.username || 'Guest';
     },
 
+    // ── Registration (creates inactive user, sends OTP) ──
+
+    /**
+     * Register a new account. User is created as inactive.
+     * OTP is sent to the user's email.
+     * Does NOT auto-login — user must verify OTP first.
+     * Returns registration email on success for the OTP page.
+     */
+    async register(username: string, email: string, password: string): Promise<{ success: boolean; email?: string; error?: string }> {
+      state.isLoading = true;
+      state.error = null;
+
+      try {
+        const resp = await fetch('/api/auth/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, email, password }),
+        });
+
+        if (!resp.ok) {
+          const data = await resp.json().catch(() => ({}));
+          state.error = data.message || 'Registration failed';
+          state.isLoading = false;
+          return { success: false, error: data.message || 'Registration failed.' };
+        }
+
+        const data = await resp.json();
+        state.isLoading = false;
+        return { success: true, email: data.email };
+      } catch (e) {
+        state.error = 'Network error. Please try again.';
+        state.isLoading = false;
+        return { success: false, error: 'Network error. Please try again.' };
+      }
+    },
+
+    /**
+     * Verify OTP code to activate user account.
+     */
+    async verifyOtp(username: string, code: string): Promise<{ success: boolean; message: string }> {
+      state.isLoading = true;
+      state.error = null;
+
+      try {
+        const resp = await fetch('/api/auth/verify-otp', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, code }),
+        });
+
+        const data = await resp.json();
+
+        if (!resp.ok || !data.success) {
+          state.error = data.message || 'Verification failed';
+          state.isLoading = false;
+          return { success: false, message: data.message || 'Verification failed.' };
+        }
+
+        state.isLoading = false;
+        return { success: true, message: data.message };
+      } catch (e) {
+        state.error = 'Network error. Please try again.';
+        state.isLoading = false;
+        return { success: false, message: 'Network error. Please try again.' };
+      }
+    },
+
+    /**
+     * Resend OTP verification code.
+     */
+    async resendOtp(username: string): Promise<{ success: boolean; message: string }> {
+      state.isLoading = true;
+      state.error = null;
+
+      try {
+        const resp = await fetch('/api/auth/resend-otp', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username }),
+        });
+
+        const data = await resp.json();
+
+        if (!resp.ok) {
+          state.error = data.message || 'Failed to resend code';
+          state.isLoading = false;
+          return { success: false, message: data.message || 'Failed to resend code.' };
+        }
+
+        state.isLoading = false;
+        return { success: true, message: data.message };
+      } catch (e) {
+        state.error = 'Network error. Please try again.';
+        state.isLoading = false;
+        return { success: false, message: 'Network error. Please try again.' };
+      }
+    },
+
     // ── Actions ──
 
     /**
      * Login with username + password.
      * Stores JWT tokens and fetches user profile.
+     * Returns detailed result including verification status.
      */
-    async login(username: string, password: string): Promise<boolean> {
+    async login(username: string, password: string): Promise<{ success: boolean; requiresVerification?: boolean; error?: string }> {
       state.isLoading = true;
       state.error = null;
 
@@ -148,14 +254,19 @@ export function createAuthStore() {
           body: JSON.stringify({ username, password }),
         });
 
-        if (!resp.ok) {
-          const data = await resp.json().catch(() => ({}));
-          state.error = data.detail || 'Login failed';
-          state.isLoading = false;
-          return false;
-        }
+        const data = await resp.json().catch(() => ({}));
 
-        const data = await resp.json();
+        if (!resp.ok) {
+          // Check if account needs verification
+          if (resp.status === 403 && data.requires_verification) {
+            state.isLoading = false;
+            return { success: false, requiresVerification: true, error: data.message };
+          }
+
+          state.error = data.message || data.detail || 'Login failed';
+          state.isLoading = false;
+          return { success: false, error: data.message || data.detail || 'Login failed.' };
+        }
 
         // Store tokens
         state.accessToken = data.access;
@@ -171,42 +282,11 @@ export function createAuthStore() {
         await this.fetchProfile();
 
         state.isLoading = false;
-        return true;
+        return { success: true };
       } catch (e) {
         state.error = 'Network error. Please try again.';
         state.isLoading = false;
-        return false;
-      }
-    },
-
-    /**
-     * Register a new account.
-     */
-    async register(username: string, email: string, password: string): Promise<boolean> {
-      state.isLoading = true;
-      state.error = null;
-
-      try {
-        const resp = await fetch('/api/auth/register', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ username, email, password }),
-        });
-
-        if (!resp.ok) {
-          const data = await resp.json().catch(() => ({}));
-          state.error = data.message || 'Registration failed';
-          state.isLoading = false;
-          return false;
-        }
-
-        // Auto-login after registration
-        state.isLoading = false;
-        return await this.login(username, password);
-      } catch (e) {
-        state.error = 'Network error. Please try again.';
-        state.isLoading = false;
-        return false;
+        return { success: false, error: 'Network error. Please try again.' };
       }
     },
 
@@ -317,6 +397,65 @@ export function createAuthStore() {
     getAuthHeaders(): Record<string, string> {
       if (!state.accessToken) return {};
       return { Authorization: `Bearer ${state.accessToken}` };
+    },
+
+    /**
+     * Change password (requires current password).
+     */
+    async changePassword(currentPassword: string, newPassword: string): Promise<{ success: boolean; error?: string }> {
+      if (!state.accessToken) return { success: false, error: 'Not authenticated' };
+
+      try {
+        const resp = await fetch('/api/auth/change-password', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...this.getAuthHeaders() },
+          body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+        });
+
+        const data = await resp.json();
+        if (!resp.ok) {
+          return { success: false, error: data.message || 'Failed to change password.' };
+        }
+        return { success: true };
+      } catch (e) {
+        return { success: false, error: 'Network error.' };
+      }
+    },
+
+    /**
+     * Request password reset OTP.
+     */
+    async forgotPassword(username: string): Promise<{ success: boolean; message: string }> {
+      try {
+        const resp = await fetch('/api/auth/forgot-password', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username }),
+        });
+
+        const data = await resp.json();
+        return { success: resp.ok, message: data.message };
+      } catch (e) {
+        return { success: false, message: 'Network error.' };
+      }
+    },
+
+    /**
+     * Reset password with OTP code.
+     */
+    async resetPassword(username: string, code: string, newPassword: string): Promise<{ success: boolean; message: string }> {
+      try {
+        const resp = await fetch('/api/auth/reset-password', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, code, new_password: newPassword }),
+        });
+
+        const data = await resp.json();
+        return { success: resp.ok, message: data.message };
+      } catch (e) {
+        return { success: false, message: 'Network error.' };
+      }
     },
 
     // ── Broker Credentials API ──

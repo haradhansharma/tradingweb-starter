@@ -10,6 +10,7 @@
  *   - Google Fonts (Space Grotesk + DM Sans)
  *   - Tailwind dark mode class on <html>
  *   - Auth store integration (JWT)
+ *   - Auth guard: redirects to login if not authenticated
  */
 
 import Sidebar from '../components/dashboard/Sidebar.astro';
@@ -70,7 +71,12 @@ const { title = 'MarketPulse — Options Analysis' } = Astro.props;
       });
 
       // Auto-init auth on page load (validates existing tokens)
-      authStore.init();
+      authStore.init().then(() => {
+        // Auth guard: redirect to login if not authenticated
+        if (!authStore.isAuthenticated) {
+          window.location.href = '/auth/login';
+        }
+      });
 
       // Cleanup on page navigation
       document.addEventListener('astro:before-swap', () => {
@@ -79,7 +85,7 @@ const { title = 'MarketPulse — Options Analysis' } = Astro.props;
     </script>
   </head>
 
-  <body class="h-full">
+  <body class="h-full" x-show="{authStore.isAuthenticated}">
     <!-- Sidebar (fixed, z-50) -->
     <Sidebar />
 

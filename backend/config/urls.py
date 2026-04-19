@@ -17,6 +17,7 @@ urlpatterns = [
     path("i18n/", include("django.conf.urls.i18n")),
     
     # Django template views (session-based auth)
+    path("accounts/", dashboard_template_view, name="dashboard"),
     path("accounts/login/", LoginView.as_view(template_name="registration/login.html"), name="login"),
     path("accounts/logout/", logout_view, name="logout"),
     path("accounts/profile/", profile_view, name="profile"),

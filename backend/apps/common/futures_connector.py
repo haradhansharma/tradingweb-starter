@@ -40,6 +40,7 @@ class FuturesConnector:
     def __init__(self, broker: str = DEFAULT_BROKER):
         self.broker = broker
         self.on_candle_complete = None  # Callback: async def(symbol, k_data)
+        self.on_price_tick = None  # Callback: async def(symbol, price) — fires on every kline tick
         self._running = False
         self._task = None
 
@@ -101,6 +102,15 @@ class FuturesConnector:
 
                         # data is a kline event: { "e": "kline", "E": ..., "k": { ... } }
                         k = data.get("k", {})
+
+                        # Fire price tick on EVERY kline update (live futures price)
+                        symbol = k.get("s", "")
+                        close_str = k.get("c", "")
+                        if symbol and close_str and self.on_price_tick:
+                            try:
+                                await self.on_price_tick(symbol, float(close_str))
+                            except Exception as e:
+                                logger.error(f"on_price_tick error for {symbol}: {e}")
 
                         if k.get("x"):  # Candle is complete
                             symbol = k.get("s", "")

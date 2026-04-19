@@ -4,8 +4,8 @@
  * Sidebar — MarketPulse Navigation
  * ===================================
  * Fixed left sidebar with branding, navigation sections,
- * and user profile. Reads reactive state from the Alpine.js
- * dashboard store (activeNav).
+ * and user profile + logout. Uses <a> links for page navigation.
+ * Active state set via aria-current attribute from dashboard store.
  */
 ---
 
@@ -16,7 +16,7 @@
 >
   <!-- ── Branding ── -->
   <div class="h-14 flex items-center px-5 border-b border-surface-500 shrink-0">
-    <div class="flex items-center gap-2.5">
+    <a href="/" class="flex items-center gap-2.5 group no-underline">
       <div class="w-8 h-8 rounded-lg bg-emerald-500/15 flex items-center justify-center">
         <svg class="w-[18px] h-[18px] text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="22 7 13.5 15.5 8.5 10.5 2 17"></polyline>
@@ -24,7 +24,7 @@
         </svg>
       </div>
       <span class="font-display font-semibold text-white text-[17px] tracking-tight">MarketPulse</span>
-    </div>
+    </a>
   </div>
 
   <!-- ── Navigation Sections ── -->
@@ -47,14 +47,13 @@
       </div>
     </div>
 
-    <!-- Overview section -->
-    <p class="px-3 mb-2 text-[10px] uppercase tracking-[.12em] text-gray-500 font-semibold">Overview</p>
+    <!-- Main nav items -->
     <template x-for="item in navItems" :key="item.id">
-      <button
-        @click="activeNav = item.id"
-        :class="activeNav === item.id ? 'active' : ''"
-        class="nav-item w-full flex items-center gap-3 px-3 py-2.5 rounded-r-lg text-[13px] text-gray-400"
+      <a
+        :href="item.href || '#'"
         :aria-current="activeNav === item.id ? 'page' : false"
+        @click.prevent="activeNav = item.id; if(item.href) window.location.href = item.href;"
+        class="nav-item w-full flex items-center gap-3 px-3 py-2.5 rounded-r-lg text-[13px] text-gray-400 no-underline cursor-pointer"
       >
         <span class="w-[18px] h-[18px] flex items-center justify-center" x-html="item.icon"></span>
         <span x-text="item.label"></span>
@@ -63,7 +62,7 @@
           x-text="item.badge"
           class="ml-auto bg-emerald-500/15 text-emerald-400 text-[10px] font-semibold px-1.5 py-0.5 rounded-full leading-none"
         ></span>
-      </button>
+      </a>
     </template>
 
     <!-- System section -->
@@ -71,10 +70,11 @@
       <p class="px-3 mb-2 text-[10px] uppercase tracking-[.12em] text-gray-500 font-semibold">System</p>
     </div>
     <template x-for="item in sysItems" :key="item.id">
-      <button
-        @click="activeNav = item.id"
-        :class="activeNav === item.id ? 'active' : ''"
-        class="nav-item w-full flex items-center gap-3 px-3 py-2.5 rounded-r-lg text-[13px] text-gray-400"
+      <a
+        :href="item.href || '#'"
+        :aria-current="activeNav === item.id ? 'page' : false"
+        @click.prevent="activeNav = item.id; if(item.href) window.location.href = item.href;"
+        class="nav-item w-full flex items-center gap-3 px-3 py-2.5 rounded-r-lg text-[13px] text-gray-400 no-underline cursor-pointer"
       >
         <span class="w-[18px] h-[18px] flex items-center justify-center" x-html="item.icon"></span>
         <span x-text="item.label"></span>
@@ -83,25 +83,40 @@
           x-text="item.badge"
           class="ml-auto bg-emerald-500/15 text-emerald-400 text-[10px] font-semibold px-1.5 py-0.5 rounded-full leading-none"
         ></span>
-      </button>
+      </a>
     </template>
   </nav>
 
-  <!-- ── User Profile ── -->
+  <!-- ── User Profile + Logout (bottom) ── -->
   <div class="p-4 border-t border-surface-500 shrink-0">
-    <template x-if="auth.isAuthenticated">
-      <a href="/settings" class="flex items-center gap-3 group cursor-pointer">
-        <div class="w-9 h-9 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white font-display font-semibold text-xs"
-          x-text="auth.username ? auth.username.substring(0, 2).toUpperCase() : '??'"
-        ></div>
-        <div class="flex-1 min-w-0">
-          <p class="text-[13px] font-medium text-gray-200 truncate group-hover:text-white transition-colors" x-text="auth.username || 'User'"></p>
-          <p class="text-[11px] text-gray-500 truncate">Settings &rarr;</p>
-        </div>
-      </a>
+    <template x-if="$store.auth.isAuthenticated">
+      <div>
+        <!-- User profile link -->
+        <a href="/profile" class="flex items-center gap-3 group no-underline mb-3 block">
+          <div class="w-9 h-9 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white font-display font-semibold text-xs shrink-0"
+            x-text="$store.auth.username ? $store.auth.username.substring(0, 2).toUpperCase() : '??'"
+          ></div>
+          <div class="flex-1 min-w-0">
+            <p class="text-[13px] font-medium text-gray-200 truncate group-hover:text-white transition-colors" x-text="$store.auth.username || 'User'"></p>
+            <p class="text-[11px] text-gray-500 truncate" x-text="$store.auth.user?.email || ''"></p>
+          </div>
+        </a>
+        <!-- Logout button -->
+        <button
+          @click="$store.auth.logout(); window.location.href = '/auth/login';"
+          class="w-full flex items-center gap-2.5 px-3 py-2 text-[12px] text-red-400 hover:bg-red-900/15 rounded-lg transition-colors cursor-pointer"
+        >
+          <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+            <polyline points="16 17 21 12 16 7"/>
+            <line x1="21" y1="12" x2="9" y2="12"/>
+          </svg>
+          Sign Out
+        </button>
+      </div>
     </template>
-    <template x-if="!auth.isAuthenticated">
-      <a href="/auth/login" class="flex items-center gap-3 group cursor-pointer">
+    <template x-if="!$store.auth.isAuthenticated">
+      <a href="/auth/login" class="flex items-center gap-3 group no-underline">
         <div class="w-9 h-9 rounded-full bg-surface-600 border border-surface-400 flex items-center justify-center text-gray-500">
           <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
             <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>

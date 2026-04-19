@@ -169,8 +169,9 @@ CHANNEL_LAYERS = {
         },
     },
 }
-# --- DATABASE 3: Custom Pub/Sub (Real-time Intelligence Broadcasts) ---
-REDIS_PUBSUB_URL = f"redis://{REDIS_HOST}:{REDIS_PORT}/3"
+
+# Note: DB3 (Pub/Sub) was removed — Django Channels (DB2) handles all real-time data delivery
+
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.2/howto/static-files/

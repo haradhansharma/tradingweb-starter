@@ -47,27 +47,49 @@ const { title = 'MarketPulse — Options Analysis' } = Astro.props;
       import { createDashboardStore } from '../stores/dashboard.ts';
       import { createAuthStore } from '../stores/authStore.ts';
 
+      // Import chart renderer functions
+      import {
+        initCard,
+        initTimeframeCard,
+        destroyTimeframeCard,
+        destroyAllCharts,
+        fetchKlinesForTimeframes,
+        buildRealIndicatorHistory,
+      } from '../utils/chartRenderer.ts';
+
       // Initialize stores
       const store = createDashboardStore();
       const authStore = createAuthStore();
 
-      // Global helper to access auth store from components
+      // Global helper to access auth store from inline scripts
       function getAlpineStore() {
         return {
           getAuthStore: () => authStore,
         };
       }
 
-      // Expose to Alpine.js as global data functions
+      // Expose to Alpine.js
       document.addEventListener('alpine:init', () => {
-        // Dashboard store (primary — set on <html> via x-data="dashboard()")
+        // Dashboard store — set on <html> via x-data="dashboard()"
         (window as any).Alpine.data('dashboard', () => store);
 
-        // Auth store (secondary — available as `auth` in components)
-        (window as any).Alpine.data('auth', () => authStore);
+        // Auth store — GLOBAL Alpine store, accessible everywhere as $store.auth
+        // e.g. $store.auth.isAuthenticated, $store.auth.username, $store.auth.logout()
+        (window as any).Alpine.store('auth', authStore);
 
-        // Global helper
+        // Global helper for inline <script> blocks on pages
         (window as any).getAlpineStore = getAlpineStore;
+
+        // Expose chart functions globally for Alpine x-init
+        (window as any)._initCard = initCard;
+        (window as any)._initTF = initTimeframeCard;
+        (window as any)._fetchKlines = fetchKlinesForTimeframes;
+        (window as any)._buildIndicatorHistory = buildRealIndicatorHistory;
+      });
+
+      // Cleanup charts on page navigation
+      document.addEventListener('astro:before-swap', () => {
+        destroyAllCharts();
       });
 
       // Auto-init auth on page load (validates existing tokens)
@@ -85,7 +107,7 @@ const { title = 'MarketPulse — Options Analysis' } = Astro.props;
     </script>
   </head>
 
-  <body class="h-full" x-show="{authStore.isAuthenticated}">
+  <body class="h-full" x-show="$store.auth.isAuthenticated">
     <!-- Sidebar (fixed, z-50) -->
     <Sidebar />
 

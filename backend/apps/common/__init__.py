@@ -27,7 +27,6 @@ from .broker_config import (
     ws_group_name,
     ws_global_group,
     ws_universal_group,
-    pubsub_channel,
 )
 
 

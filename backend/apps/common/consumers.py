@@ -45,6 +45,7 @@ ALLOWED_CATEGORIES = {
     "error",
     "indicators",
     "sessions",
+    "futuresPrice",
 }
 
 
@@ -326,6 +327,16 @@ class MarketConsumer(AsyncWebsocketConsumer):
 
         try:
             payload = json.loads(raw)
+            # Safety: verify the cached payload's underlying matches the request.
+            # Prevents serving stale data from a wrong asset (e.g. after symbol
+            # list changes or cache key collision).
+            payload_underlying = payload.get("underlying", "")
+            if payload_underlying and payload_underlying.upper() != underlying.upper():
+                logger.warning(
+                    f"Cached {category} underlying mismatch: "
+                    f"request={underlying}, payload={payload_underlying}"
+                )
+                return
             await self.send(text_data=json.dumps(payload))
             logger.debug(f"Instant push {category} for {underlying}")
         except (json.JSONDecodeError, TypeError):

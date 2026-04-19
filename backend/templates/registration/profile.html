@@ -8,6 +8,8 @@
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: 'DM Sans', sans-serif; background: #0f1117; color: #e5e7eb; min-height: 100vh; }
+
+        /* ── Topbar ── */
         .topbar {
             background: #1a1d27;
             border-bottom: 1px solid #2a2d3a;
@@ -16,9 +18,30 @@
             justify-content: space-between;
             align-items: center;
         }
-        .topbar .logo { font-family: 'Space Grotesk', sans-serif; font-size: 18px; font-weight: 700; color: #60a5fa; }
-        .topbar a { color: #9ca3af; text-decoration: none; font-size: 13px; }
-        .topbar a:hover { color: #e5e7eb; }
+        .topbar .logo-row { display: flex; align-items: center; gap: 8px; }
+        .topbar .logo-icon {
+            width: 28px; height: 28px; border-radius: 6px;
+            background: rgba(16, 185, 129, 0.15);
+            display: flex; align-items: center; justify-content: center;
+        }
+        .topbar .logo-icon svg { width: 16px; height: 16px; stroke: #34d399; }
+        .topbar .logo { font-family: 'Space Grotesk', sans-serif; font-size: 16px; font-weight: 700; color: #f9fafb; }
+        .topbar .nav { display: flex; gap: 4px; }
+        .topbar .nav a {
+            padding: 6px 12px;
+            border-radius: 6px;
+            color: #9ca3af;
+            text-decoration: none;
+            font-size: 12px;
+            font-weight: 500;
+            transition: all 0.15s;
+        }
+        .topbar .nav a:hover { background: #2a2d3a; color: #e5e7eb; }
+        .topbar .nav a.active { background: rgba(16, 185, 129, 0.1); color: #34d399; }
+        .topbar .nav a.logout { color: #f87171; }
+        .topbar .nav a.logout:hover { background: rgba(239, 68, 68, 0.1); }
+
+        /* ── Content ── */
         .container { max-width: 700px; margin: 40px auto; padding: 0 24px; }
         .card {
             background: #1a1d27;
@@ -27,74 +50,127 @@
             padding: 28px;
             margin-bottom: 24px;
         }
-        .card h2 { font-family: 'Space Grotesk', sans-serif; font-size: 18px; font-weight: 600; margin-bottom: 20px; }
-        .field { margin-bottom: 16px; }
-        .field label { display: block; font-size: 12px; color: #6b7280; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.05em; }
-        .field .value { font-size: 15px; }
-        .nav-links { display: flex; gap: 12px; }
-        .nav-links a {
-            display: inline-block; padding: 8px 16px; background: #1e293b;
-            border: 1px solid #334155; border-radius: 8px; color: #e5e7eb;
-            text-decoration: none; font-size: 13px; transition: all 0.2s;
+        .card h2 {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 20px;
+            color: #f9fafb;
         }
-        .nav-links a:hover { background: #334155; }
-        .nav-links a.active { background: #3b82f6; border-color: #3b82f6; }
+        .field { margin-bottom: 16px; }
+        .field label {
+            display: block;
+            font-size: 11px;
+            color: #6b7280;
+            margin-bottom: 4px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        .field .value { font-size: 14px; color: #d1d5db; }
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+        .badge-yes { background: #065f46; color: #6ee7b7; }
+        .badge-no { background: #78350f; color: #fcd34d; }
+        .badge-on { background: #065f46; color: #6ee7b7; }
+        .badge-off { background: #374151; color: #9ca3af; }
     </style>
 </head>
 <body>
+    <!-- ── Topbar ── -->
     <div class="topbar">
-        <span class="logo">MarketPulse</span>
-        <div>
-            <a href="{% url 'profile' %}">Profile</a> &middot;
-            <a href="{% url 'credentials' %}">API Credentials</a> &middot;
-            <a href="{% url 'logout' %}">Logout</a>
+        <div class="logo-row">
+            <div class="logo-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="22 7 13.5 15.5 8.5 10.5 2 17"></polyline>
+                    <polyline points="16 7 22 7 22 13"></polyline>
+                </svg>
+            </div>
+            <span class="logo">MarketPulse</span>
+        </div>
+        <div class="nav">
+            <a href="/" class="">Dashboard</a>
+            <a href="{% url 'profile' %}" class="active">Profile</a>
+            <a href="{% url 'credentials' %}">Credentials</a>
+            <a href="{% url 'logout' %}" class="logout">Sign Out</a>
         </div>
     </div>
 
+    <!-- ── Content ── -->
     <div class="container">
-        <div class="nav-links">
-            <a href="{% url 'profile' %}" class="active">Profile</a>
-            <a href="{% url 'credentials' %}">API Credentials</a>
-            <a href="/">Dashboard</a>
-        </div>
-
         <div class="card">
             <h2>User Profile</h2>
-            <div class="field">
-                <label>Username</label>
-                <div class="value">{{ user.username }}</div>
-            </div>
-            <div class="field">
-                <label>Email</label>
-                <div class="value">{{ user.email|default:"Not set" }}</div>
-            </div>
-            <div class="field">
-                <label>Joined</label>
-                <div class="value">{{ user.date_joined|date:"M d, Y" }}</div>
-            </div>
-            <div class="field">
-                <label>Risk Tolerance</label>
-                <div class="value">{{ user.get_risk_tolerance_display }}</div>
-            </div>
-            <div class="field">
-                <label>Tracked Assets</label>
-                <div class="value">{{ user.tracked_assets|join:", "|default:"None" }}</div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                <div class="field">
+                    <label>Username</label>
+                    <div class="value">{{ user.username }}</div>
+                </div>
+                <div class="field">
+                    <label>Email</label>
+                    <div class="value">{{ user.email|default:"Not set" }}</div>
+                </div>
+                <div class="field">
+                    <label>Joined</label>
+                    <div class="value">{{ user.date_joined|date:"M d, Y" }}</div>
+                </div>
+                <div class="field">
+                    <label>Risk Tolerance</label>
+                    <div class="value">{{ user.get_risk_tolerance_display }}</div>
+                </div>
+                <div class="field">
+                    <label>Verified</label>
+                    <div class="value">
+                        {% if user.is_verified %}
+                            <span class="badge badge-yes">Verified</span>
+                        {% else %}
+                            <span class="badge badge-no">Unverified</span>
+                        {% endif %}
+                    </div>
+                </div>
+                <div class="field">
+                    <label>Tracked Assets</label>
+                    <div class="value">{{ user.tracked_assets|join:", "|default:"All (default)" }}</div>
+                </div>
             </div>
         </div>
 
         <div class="card">
             <h2>Notification Preferences</h2>
-            <div class="field">
-                <label>Strong Signals</label>
-                <div class="value">{{ user.notify_strong_signals|yesno:"Enabled,Disabled" }}</div>
-            </div>
-            <div class="field">
-                <label>Whale Activity</label>
-                <div class="value">{{ user.notify_whale_activity|yesno:"Enabled,Disabled" }}</div>
-            </div>
-            <div class="field">
-                <label>Market Shifts</label>
-                <div class="value">{{ user.notify_market_shifts|yesno:"Enabled,Disabled" }}</div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px;">
+                <div class="field">
+                    <label>Strong Signals</label>
+                    <div class="value">
+                        {% if user.notify_strong_signals %}
+                            <span class="badge badge-on">Enabled</span>
+                        {% else %}
+                            <span class="badge badge-off">Disabled</span>
+                        {% endif %}
+                    </div>
+                </div>
+                <div class="field">
+                    <label>Whale Activity</label>
+                    <div class="value">
+                        {% if user.notify_whale_activity %}
+                            <span class="badge badge-on">Enabled</span>
+                        {% else %}
+                            <span class="badge badge-off">Disabled</span>
+                        {% endif %}
+                    </div>
+                </div>
+                <div class="field">
+                    <label>Market Shifts</label>
+                    <div class="value">
+                        {% if user.notify_market_shifts %}
+                            <span class="badge badge-on">Enabled</span>
+                        {% else %}
+                            <span class="badge badge-off">Disabled</span>
+                        {% endif %}
+                    </div>
+                </div>
             </div>
         </div>
     </div>

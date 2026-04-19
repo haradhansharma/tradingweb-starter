@@ -10,8 +10,6 @@ Redis Keys (DB0 — Cache):
   kline:{SYMBOL}:{TF}:history  → Sorted Set (aggregated from 1m)
   indicators:{SYMBOL}          → Hash (field=value pairs for all TFs + indicators)
 
-Redis Pub/Sub (DB3):
-  Channel: "indicators:{SYMBOL}" → Published on every indicator recalculation
 """
 
 import json
@@ -171,16 +169,14 @@ class KlineStore:
     Uses async Redis for non-blocking operations.
     """
 
-    def __init__(self, cache_client, pubsub_client=None, broker: str = "binance"):
+    def __init__(self, cache_client, broker: str = "binance"):
         """
         Parameters
         ----------
-        cache_client : redis.asyncio.Redis    — DB0 connection for cache
-        pubsub_client : redis.asyncio.Redis   — DB3 connection for pub/sub (optional)
+        cache_client : redis.asyncio.Redis    — DB0 connection for cache  
         broker : str                           — Broker name for Redis key prefix
         """
-        self.cache = cache_client
-        self.pubsub = pubsub_client
+        self.cache = cache_client    
         self.broker = broker
 
     # ------------------------------------------------------------------

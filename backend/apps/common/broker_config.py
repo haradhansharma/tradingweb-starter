@@ -196,18 +196,6 @@ def ws_universal_group(category: str) -> str:
     """
     return f"GLOBAL.{category}"
 
-
-def pubsub_channel(broker: str, underlying: str, category: str) -> str:
-    """
-    Build a broker-namespaced Redis Pub/Sub channel name.
-
-    Examples:
-        pubsub_channel("binance", "BTCUSDT", "markPrice") → "binance:signal:BTCUSDT:markPrice"
-    """
-    prefix = get_redis_prefix(broker)
-    return f"{prefix}:signal:{underlying}:{category}"
-
-
 def get_available_brokers() -> List[Dict[str, str]]:
     """
     Get list of available brokers for the frontend selector.

@@ -34,6 +34,16 @@
       "title": "Composite Options Signal",
       "calculation": "Signal is a weighted composite score derived from: PCR z-score (20%), IV Rank percentile (15%), Net Delta z-score (20%), Net Gamma z-score (20%), Skew z-score (10%), GEX sign & magnitude (15%). Each component is normalized to a z-score using 30-day rolling statistics, then blended. The final score maps to one of 7 decision labels.",
       "impact": "STRONG BUY / BUY = multiple options metrics aligned bullishly — high conviction long setup. LEAN BUY = moderate bullish tilt but some conflicting signals — cautiously bullish. NEUTRAL = metrics are mixed or within normal range — no edge from options flow alone. LEAN SELL / SELL / STRONG SELL = the inverse bearish spectrum. The signal is the PRIMARY decision driver for the dashboard's color-coded recommendation."
+    },
+    "whale_buy": {
+      "title": "Whale Buy Volume",
+      "calculation": "Aggregated notional value of large buy orders (orders above a size threshold, typically top 1% by volume) in USDT. Sourced from real-time trade flow data via the broker's trade stream. Only considers market buys (taker aggression).",
+      "impact": "Whale buy volume indicates institutional accumulation. When whale buy volume significantly exceeds whale sell volume, it suggests large players are building long positions — typically bullish. Sudden spikes in whale buying often precede or coincide with price rallies. The Buy/Sell ratio in the Whale Flow bar provides a quick visual of the imbalance."
+    },
+    "whale_sell": {
+      "title": "Whale Sell Volume",
+      "calculation": "Aggregated notional value of large sell orders (orders above a size threshold, typically top 1% by volume) in USDT. Sourced from real-time trade flow data via the broker's trade stream. Only considers market sells (taker aggression).",
+      "impact": "Whale sell volume indicates institutional distribution. When whale sell volume significantly exceeds whale buy volume, it suggests large players are reducing positions or shorting — typically bearish. Sudden spikes in whale selling often precede or coincide with price drops. The Buy/Sell ratio in the Whale Flow bar provides a quick visual of the imbalance."
     }
   },
 
@@ -158,6 +168,16 @@
       "title": "Secondary Stop Loss (SL2)",
       "description": "The second Options Wall level beyond the primary stop loss. This provides a deeper invalidation level. If price reaches SL2, the market structure has fundamentally shifted — the options positioning that supported your thesis has been overrun.",
       "impact": "SL2 is the absolute maximum loss level. For trailing stop strategies, consider moving your stop from SL to breakeven after price reaches TP, then to SL2 as the market moves further. Reaching SL2 signals that market makers' hedging flows have overwhelmed your directional thesis — exit immediately."
+    },
+    "max_pain": {
+      "title": "Max Pain",
+      "calculation": "Max Pain is the strike price at which the total dollar payout of ALL outstanding in-the-money options is MINIMIZED. For each candidate strike, it sums: (Strike - Call Strike) x Call OI for ITM calls, plus (Put Strike - Strike) x Put OI for ITM puts. The strike with the lowest total payout = Max Pain. Computed from the full option chain OI data for the nearest expiry.",
+      "impact": "Max Pain represents the price where option WRITERS (sellers) lose the least money at expiry. Because institutional sellers are the largest players, their collective interest creates a gravitational pull — price tends to drift toward Max Pain as expiry approaches. It is a leading indicator of where 'smart money' wants price to settle. When Max Pain is above current price, it is bullish; when below, bearish. The signal engine scores this as one of its weighted variables (15/110 points)."
+    },
+    "max_wall": {
+      "title": "Max Wall",
+      "calculation": "Max Wall is the strike price with the HIGHEST combined open interest (Call OI + Put OI) across all strikes in the option chain. Unlike Max Pain (which uses payout math), Max Wall is a pure concentration metric — it identifies the single strike where the most contracts are clustered regardless of direction.",
+      "impact": "Max Wall is the strongest OI 'wall' in the market — the level with the heaviest hedging obligation for market makers. This creates a powerful magnetic effect: price gravitates toward the Max Wall because dealers must continuously adjust their hedges as price approaches this concentration of contracts. It acts as an equilibrium point and intraday magnet. When Max Wall is above price, it pulls price up (bullish). When below, it pulls price down (bearish). Compare Max Wall with TP/SL levels — if they align, conviction increases significantly."
     }
   },
 
@@ -173,6 +193,24 @@
     "US": {
       "title": "US Session",
       "description": "US Session (approximately 12:00–21:00 UTC). New York brings the highest options volume and volatility. Major economic releases, Fed announcements, and institutional flow peaks during US hours. The US session often determines the daily trend direction. CME futures gaps are measured relative to US regular session close."
+    }
+  },
+
+  "indicators": {
+    "rsi": {
+      "title": "Relative Strength Index (RSI)",
+      "calculation": "RSI = 100 - (100 / (1 + RS)), where RS = Average Gain over 14 periods / Average Loss over 14 periods. Uses Wilder's smoothing method (exponential). Computed on the selected timeframe's kline candles.",
+      "impact": "RSI measures momentum on a 0-100 scale. Above 70 = overbought (potential reversal down), below 30 = oversold (potential reversal up). The 50 level is the momentum midpoint — above 50 is bullish momentum, below 50 is bearish. Divergences between RSI and price are powerful reversal signals. Used by the signal engine as a supplementary momentum filter alongside options-derived metrics."
+    },
+    "atr": {
+      "title": "Average True Range (ATR)",
+      "calculation": "ATR = Moving Average of True Range over 14 periods. True Range = max(High-Low, |High-PrevClose|, |Low-PrevClose|). Uses Wilder's smoothing (equivalent to EMA with alpha=1/14). Computed on the selected timeframe's kline candles.",
+      "impact": "ATR measures volatility — how much an asset typically moves per bar, regardless of direction. Higher ATR = more volatile, lower ATR = more stable. Useful for position sizing (larger ATR = smaller position to maintain same risk). The ATR bar in Quick Glance shows ATR as a percentage of price — above 1.5% indicates high volatility regime. ATR is also used internally by strategy engines for breakout confirmation and stop-loss sizing."
+    },
+    "adx": {
+      "title": "Average Directional Index (ADX)",
+      "calculation": "ADX = smoothed average of DX over 14 periods. DX = |+DI - -DI| / (+DI + -DI) x 100. +DI measures bullish directional movement, -DI measures bearish directional movement. Both use Wilder's smoothing. Computed on the selected timeframe's kline candles.",
+      "impact": "ADX measures TREND STRENGTH (not direction) on a 0-100 scale. Above 25 = strong trending market, below 20 = weak/absent trend (ranging market). The directional bias is determined by +DI vs -DI (not ADX itself). ADX above 25 with +DI > -DI = strong uptrend. ADX above 25 with -DI > +DI = strong downtrend. ADX declining from high levels signals trend exhaustion. Used by strategy engines to filter for trending vs ranging conditions."
     }
   },
 

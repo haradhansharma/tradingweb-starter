@@ -29,13 +29,13 @@ def dashboard_template_view(request):
     Useful for embedding the Astro SPA via iframe or as a fallback
     when JavaScript is disabled.
     """
-    return render(request, "users/dashboard.html", {"user": request.user})
+    return render(request, "registration/dashboard.html", {"user": request.user})
 
 
 @login_required
 def profile_view(request):
     """User profile page — view and update profile settings."""
-    return render(request, "users/profile.html", {"user": request.user})
+    return render(request, "registration/profile.html", {"user": request.user})
 
 
 @login_required
@@ -45,7 +45,7 @@ def credentials_view(request):
 
     return render(
         request,
-        "users/credentials.html",
+        "registration/credentials.html",
         {
             "user": request.user,
             "available_brokers": get_available_brokers(),

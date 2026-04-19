@@ -1,99 +1,565 @@
 ---
 /**
- * tradingweb/frontend/src/components/dashboard/AssetCard.astro
- * AssetCard — Per-Underlying Analysis Card (Split Layout)
- * ========================================================
+ * AssetCard.astro — Multi-Pane Chart Card
+ * =================================================
+ * Full-width single-card layout with integrated decision data.
+ *
  * Layout:
- *   LEFT CARD: Header + 7 Calc Variables + Technical Indicators
- *   RIGHT COLUMN: Decision surface panel (Options signal, Strategies, S/R, Actions)
+ *   Header: Symbol | Category | Charts badge | [Decision badge] | Price | Change
+ *   Quick Glance: Timeframe | RSI bar+arrow | ATR bar+arrow | ADX bar+arrow | Signal
+ *   Variable Grid: 7 vars (from store) + Decision cell (8 cols)
+ *   Strategy Row: Compact inline strategies + SBS detail
+ *   S/R Bar: TP | SL | TP2 | SL2 | Max Pain | Max Wall (highest OI equilibrium)
+ *   Whale Flow: Buy/Sell bars
+ *   Technical Analysis: 2x2 timeframe chart grid (zoomable)
+ *   Action Bar: BUY | SELL | Dismiss
  *
- * On mobile (< lg): right column stacks below left card.
- *
- * Tooltips use the GLOBAL store-based system:
- *   @mouseenter="showTooltip('group', 'key')"
- *   @mouseleave="hideTooltip()"
- * The tooltip panel lives in DashboardLayout.astro (body level),
- * so it survives Alpine re-renders caused by WebSocket data updates.
+ * Features:
+ *   - Charts are zoomable (scroll to zoom, drag to pan)
+ *   - Dynamic sub-pane sizing (if some types absent, others expand)
+ *   - Data cached for fast tab re-switching
+ *   - All data from WebSocket (no mock dependency)
  */
 ---
 
-<!-- ── Outer wrapper: flex row on lg+, flex col on mobile ── -->
-<div
-  class="flex flex-col lg:flex-row gap-0 lg:gap-3"
-  :class="a.flash === 'up' ? 'flash-up' : a.flash === 'down' ? 'flash-down' : ''"
+<article
+  class="bg-white dark:bg-surface-700 rounded-xl border border-gray-200/80 dark:border-surface-300 overflow-hidden transition-colors duration-300"
+  x-data="{ initialized: false, loading: false }"
+  x-init="window._initCard($el, a, this)"
 >
   <!-- ═══════════════════════════════════════════════
-       LEFT CARD — Intelligence + Indicators
+       HEADER — Symbol, Decision Badge, Price, Change
        ═══════════════════════════════════════════════ -->
-  <article class="flex-1 min-w-0 bg-white dark:bg-surface-700 rounded-xl lg:rounded-l-xl rounded-r-none lg:rounded-r-none border border-gray-200/80 dark:border-surface-300 overflow-hidden transition-colors duration-300">
-
-    <!-- ── Card Header: Symbol, Category, Price, Change ── -->
-    <div class="flex items-center justify-between px-5 py-3.5 border-b border-gray-100 dark:border-surface-400">
-      <div class="flex items-center gap-3">
-        <span class="font-display font-bold text-[16px] sm:text-[18px]" x-text="a.symbol"></span>
-        <span
-          class="text-[10px] font-medium px-2 py-0.5 rounded-md bg-gray-100 dark:bg-surface-600 text-gray-500 dark:text-gray-400"
-          x-text="a.category"
-        ></span>
-      </div>
-      <div class="flex items-center gap-4">
+  <div class="flex items-center justify-between px-5 py-3.5 border-b border-gray-100 dark:border-surface-400">
+    <div class="flex items-center gap-3">
+      <span class="font-display font-bold text-[16px] sm:text-[18px]" x-text="a.symbol"></span>
+      <span
+        class="text-[10px] font-medium px-2 py-0.5 rounded-md bg-gray-100 dark:bg-surface-600 text-gray-500 dark:text-gray-400"
+        x-text="a.category"
+      ></span>
+      <span class="text-[9px] font-bold px-1.5 py-0.5 rounded bg-sky-500/15 text-sky-600 dark:text-sky-400 uppercase tracking-wider">Charts</span>
+    </div>
+    <div class="flex items-center gap-3 sm:gap-4">
+      <!-- Decision Badge -->
+      <span
+        class="font-display font-extrabold text-[12px] sm:text-[13px] px-2.5 py-1 rounded-lg tracking-wide shrink-0 hidden sm:inline-flex"
+        :class="{
+          'bg-emerald-500 text-white shadow-sm shadow-emerald-500/30': a.decision === 'STRONG BUY',
+          'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400': a.decision === 'BUY',
+          'bg-gray-100 dark:bg-surface-600 text-gray-500 dark:text-gray-400': a.decision === 'NEUTRAL',
+          'bg-red-500/15 text-red-600 dark:text-red-400': a.decision === 'SELL',
+          'bg-red-500 text-white shadow-sm shadow-red-500/30': a.decision === 'STRONG SELL',
+          'bg-gray-100 dark:bg-surface-600 text-gray-400 dark:text-gray-500': !a.decision || a.decision === 'CONNECTING',
+        }"
+        x-text="a.decision || 'CONNECTING'"
+      ></span>
+      <!-- Price -->
+      <div class="flex flex-col items-end gap-0.5 shrink-0">
         <span
           class="font-display font-bold text-[18px] sm:text-[20px] tracking-tight"
           x-text="'$' + fmtPrice(a.price, a.decimals)"
         ></span>
         <span
-          class="font-display font-semibold text-[13px] sm:text-[14px] px-2 py-0.5 rounded-md"
-          :class="a.change >= 0 ? 'text-emerald-500 bg-emerald-500/10' : 'text-red-500 bg-red-500/10'"
-          x-text="(a.change >= 0 ? '+' : '') + a.change.toFixed(2) + '%'"
+          class="font-mono text-[11px] sm:text-[12px] text-sky-400 dark:text-sky-300 tracking-tight"
+          x-show="a.futuresPrice > 0"
+          x-text="'FUT $' + fmtPrice(a.futuresPrice, a.decimals)"
         ></span>
       </div>
+      <span
+        class="font-display font-semibold text-[13px] sm:text-[14px] px-2 py-0.5 rounded-md shrink-0"
+        :class="a.change >= 0 ? 'text-emerald-500 bg-emerald-500/10' : 'text-red-500 bg-red-500/10'"
+        x-text="(a.change >= 0 ? '+' : '') + a.change.toFixed(2) + '%'"
+      ></span>
     </div>
+  </div>
 
-    <!-- ── 7 Calculation Variables Grid (tooltips on hover) ── -->
-    <div class="grid grid-cols-4 sm:grid-cols-7 gap-0 divide-x divide-y divide-gray-100 dark:divide-surface-400">
-      <template x-for="vl in varLabels" :key="vl.key">
+  <!-- ── Quick Glance Bar ── -->
+  <div class="flex items-center gap-3 sm:gap-4 px-5 py-3 border-b border-gray-100 dark:border-surface-400 bg-gray-50/50 dark:bg-surface-800/50 overflow-x-auto"
+    x-data="{
+      // Selected timeframe — click the TF badge to cycle through
+      _tfIdx: 0,
+      get availableTfs() { return (indicatorConfig?.timeframes || []).map(t => t.key); },
+      getTf() { return this.availableTfs[this._tfIdx] || '1m'; },
+      cycleTf() { this._tfIdx = (this._tfIdx + 1) % this.availableTfs.length; },
+      rsiKey() { return this.getTf() + '_rsi_14'; },
+      atrKey() {
+        const k = this.getTf() + '_atr_14';
+        return (a.indicators && a.indicators[k] != null) ? k : null;
+      },
+      adxKey() {
+        const k = this.getTf() + '_adx_adx';
+        return (a.indicators && a.indicators[k] != null) ? k : null;
+      },
+    }"
+  >
+    <!-- Primary timeframe label — click to cycle -->
+    <button
+      class="text-[11px] font-bold px-2 py-0.5 rounded-md uppercase tracking-wider shrink-0 cursor-pointer hover:brightness-125 active:scale-95 transition-all"
+      :class="{
+        'bg-sky-500/15 text-sky-600 dark:text-sky-400': getTf() === '1m',
+        'bg-amber-500/15 text-amber-600 dark:text-amber-400': getTf() === '15m',
+        'bg-violet-500/15 text-violet-600 dark:text-violet-400': getTf() === '1h',
+        'bg-rose-500/15 text-rose-600 dark:text-rose-400': getTf() === '4h',
+      }"
+      x-text="getTf()"
+      @click="cycleTf()"
+      title="Click to switch timeframe"
+    ></button>
+    <!-- RSI with bar + arrow -->
+    <div class="flex items-center gap-2 shrink-0 tip-trigger"
+      @mouseenter="showTooltip('indicators', 'rsi', undefined, undefined, $event.target.closest('.tip-trigger'))"
+      @mouseleave="hideTooltip()"
+      @touchstart.prevent="showTooltip('indicators', 'rsi', undefined, undefined, $event.target.closest('.tip-trigger'))"
+    >
+      <span class="text-[11px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider">RSI</span>
+      <div class="w-20 h-2.5 rounded-full bg-gray-200 dark:bg-surface-500 overflow-hidden">
         <div
-          class="px-4 py-3.5 flex flex-col justify-center tip-trigger"
-          @mouseenter="showTooltip('variables', vl.key, undefined, undefined, $event.target.closest('.tip-trigger'))"
+          class="h-full rounded-full transition-all duration-500"
+          :class="(a.indicators[rsiKey()] || 50) >= 70 ? 'bg-red-400' : (a.indicators[rsiKey()] || 50) <= 30 ? 'bg-emerald-400' : 'bg-amber-400'"
+          :style="'width:' + Math.min(100, Math.max(0, a.indicators[rsiKey()] || 50)) + '%'"
+        ></div>
+      </div>
+      <span class="text-[12px] font-mono font-bold w-7 text-right" :class="(a.indicators[rsiKey()] || 50) >= 70 ? 'text-red-500' : (a.indicators[rsiKey()] || 50) <= 30 ? 'text-emerald-500' : 'text-gray-500 dark:text-gray-400'" x-text="a.indicators[rsiKey()] != null ? (a.indicators[rsiKey()]).toFixed(0) : '—'"></span>
+      <!-- Arrow: up=green if >50, down=red if <=50 -->
+      <svg class="w-4 h-4 shrink-0" x-show="a.indicators[rsiKey()] != null" viewBox="0 0 20 20" fill="currentColor">
+        <path x-show="(a.indicators[rsiKey()] || 50) > 50" d="M10 3L14 10H6L10 3Z" class="text-emerald-500"/>
+        <path x-show="(a.indicators[rsiKey()] || 50) <= 50" d="M10 17L6 10H14L10 17Z" class="text-red-500"/>
+      </svg>
+    </div>
+    <!-- ATR with bar + arrow -->
+    <div class="flex items-center gap-2 shrink-0 tip-trigger" x-show="atrKey()"
+      @mouseenter="showTooltip('indicators', 'atr', undefined, undefined, $event.target.closest('.tip-trigger'))"
+      @mouseleave="hideTooltip()"
+      @touchstart.prevent="showTooltip('indicators', 'atr', undefined, undefined, $event.target.closest('.tip-trigger'))"
+    >
+      <span class="text-[11px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider">ATR</span>
+      <div class="w-16 h-2.5 rounded-full bg-gray-200 dark:bg-surface-500 overflow-hidden">
+        <div
+          class="h-full rounded-full bg-violet-400 transition-all duration-500"
+          :style="'width:' + Math.min(100, Math.max(5, ((a.indicators[atrKey()] || 0) / Math.max(1, a.price || 1)) * 200)) + '%'"
+        ></div>
+      </div>
+      <span class="text-[12px] font-mono font-bold text-gray-500 dark:text-gray-400 w-14 text-right" x-text="a.indicators[atrKey()] != null ? a.indicators[atrKey()].toFixed(2) : '—'"></span>
+      <!-- ATR arrow: >1.5% of price = high vol (amber up), else normal (gray down) -->
+      <svg class="w-4 h-4 shrink-0" x-show="a.indicators[atrKey()] != null" viewBox="0 0 20 20" fill="currentColor">
+        <path x-show="((a.indicators[atrKey()] || 0) / Math.max(1, a.price || 1)) * 100 > 1.5" d="M10 3L14 10H6L10 3Z" class="text-amber-500"/>
+        <path x-show="((a.indicators[atrKey()] || 0) / Math.max(1, a.price || 1)) * 100 <= 1.5" d="M10 17L6 10H14L10 17Z" class="text-gray-400"/>
+      </svg>
+    </div>
+    <!-- ADX with bar + arrow -->
+    <div class="flex items-center gap-2 shrink-0 tip-trigger" x-show="adxKey()"
+      @mouseenter="showTooltip('indicators', 'adx', undefined, undefined, $event.target.closest('.tip-trigger'))"
+      @mouseleave="hideTooltip()"
+      @touchstart.prevent="showTooltip('indicators', 'adx', undefined, undefined, $event.target.closest('.tip-trigger'))"
+    >
+      <span class="text-[11px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider">ADX</span>
+      <div class="w-16 h-2.5 rounded-full bg-gray-200 dark:bg-surface-500 overflow-hidden">
+        <div
+          class="h-full rounded-full transition-all duration-500"
+          :class="(a.indicators[adxKey()] || 0) >= 25 ? 'bg-sky-400' : 'bg-gray-400 dark:bg-gray-500'"
+          :style="'width:' + Math.min(100, Math.max(0, (a.indicators[adxKey()] || 0) / 50 * 100)) + '%'"
+        ></div>
+      </div>
+      <span class="text-[12px] font-mono font-bold w-5 text-right" :class="(a.indicators[adxKey()] || 0) >= 25 ? 'text-sky-500' : 'text-gray-500 dark:text-gray-400'" x-text="a.indicators[adxKey()] != null ? (a.indicators[adxKey()]).toFixed(0) : '—'"></span>
+      <!-- ADX arrow: >=25 trending (green up), <25 weak trend (red down) -->
+      <svg class="w-4 h-4 shrink-0" x-show="a.indicators[adxKey()] != null" viewBox="0 0 20 20" fill="currentColor">
+        <path x-show="(a.indicators[adxKey()] || 0) >= 25" d="M10 3L14 10H6L10 3Z" class="text-emerald-500"/>
+        <path x-show="(a.indicators[adxKey()] || 0) < 25" d="M10 17L6 10H14L10 17Z" class="text-red-500"/>
+      </svg>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════
+       VARIABLE GRID — 7 vars + Decision (8 cells)
+       ═══════════════════════════════════════════════ -->
+  <div class="grid grid-cols-4 sm:grid-cols-8 gap-0 divide-x divide-y divide-gray-100 dark:divide-surface-400">
+    <template x-for="vl in varLabels" :key="vl.key">
+      <div
+        class="px-3 sm:px-4 py-3 flex flex-col justify-center tip-trigger"
+        @mouseenter="showTooltip('variables', vl.key, undefined, undefined, $event.target.closest('.tip-trigger'))"
+        @mouseleave="hideTooltip()"
+        @touchstart.prevent="showTooltip('variables', vl.key, undefined, undefined, $event.target.closest('.tip-trigger'))"
+      >
+        <p class="text-[10px] sm:text-[11px] uppercase tracking-[.1em] font-semibold text-gray-400 dark:text-gray-500 mb-1" x-text="vl.label"></p>
+        <p
+          class="font-display font-bold text-[15px] sm:text-[17px] tracking-tight leading-none"
+          :class="a.vars && a.vars[vl.key] !== null ? '' : 'text-gray-300 dark:text-gray-600'"
+          x-text="fmtVar(vl.key, a.vars ? a.vars[vl.key] : null)"
+        ></p>
+      </div>
+    </template>
+    <!-- 8th cell: Decision (no label, big value) -->
+    <div
+      class="px-3 sm:px-4 py-3 flex items-center justify-center tip-trigger"
+      @mouseenter="showTooltip('decisions', a.decision, undefined, undefined, $event.target.closest('.tip-trigger'))"
+      @mouseleave="hideTooltip()"
+      @touchstart.prevent="showTooltip('decisions', a.decision, undefined, undefined, $event.target.closest('.tip-trigger'))"
+      :class="{
+        'bg-emerald-500/5': a.decision === 'STRONG BUY',
+        'bg-emerald-500/[.03]': a.decision === 'BUY',
+        'bg-red-500/5': a.decision === 'STRONG SELL',
+        'bg-red-500/[.03]': a.decision === 'SELL',
+      }"
+    >
+      <p
+        class="font-display font-extrabold text-[20px] sm:text-[24px] tracking-tight leading-none"
+        :class="{
+          'text-emerald-500 dark:text-emerald-400': a.decision === 'STRONG BUY' || a.decision === 'BUY',
+          'text-gray-400 dark:text-gray-500': a.decision === 'NEUTRAL',
+          'text-red-500 dark:text-red-400': a.decision === 'SELL' || a.decision === 'STRONG SELL',
+          'text-gray-300 dark:text-gray-600': !a.decision || a.decision === 'CONNECTING',
+        }"
+        x-text="a.decision || '—'"
+      ></p>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════
+       STRATEGY ROW — Compact inline strategies
+       ═══════════════════════════════════════════════ -->
+  <div
+    class="flex items-center gap-3 px-5 py-2.5 border-t border-gray-100 dark:border-surface-400 overflow-x-auto"
+    x-show="a.strategies && a.strategies.length > 0"
+  >
+    <span
+      class="text-[12px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider shrink-0 tip-trigger"
+      @mouseenter="showTooltip('strategies', '_generic', undefined, undefined, $event.target.closest('.tip-trigger'))"
+      @mouseleave="hideTooltip()"
+      @touchstart.prevent="showTooltip('strategies', '_generic', undefined, undefined, $event.target.closest('.tip-trigger'))"
+    >Strategies</span>
+    <div class="flex items-center gap-4 min-w-0">
+      <template x-for="s in (a.strategies || [])" :key="s.key">
+        <div
+          class="flex items-center gap-1.5 shrink-0 tip-trigger"
+          @mouseenter="showTooltip('strategies', s.key, 'strategies', '_generic', $event.target.closest('.tip-trigger'))"
           @mouseleave="hideTooltip()"
-          @touchstart.prevent="showTooltip('variables', vl.key, undefined, undefined, $event.target.closest('.tip-trigger'))"
+          @touchstart.prevent="showTooltip('strategies', s.key, 'strategies', '_generic', $event.target.closest('.tip-trigger'))"
         >
-          <p
-            class="text-[10px] sm:text-[11px] uppercase tracking-[.1em] font-semibold text-gray-400 dark:text-gray-500 mb-1"
-            x-text="vl.label"
-          ></p>
-          <p
-            class="font-display font-bold text-[17px] sm:text-[19px] tracking-tight leading-none"
-            :class="a.vars[vl.key] === null ? 'text-gray-300 dark:text-gray-600' : ''"
-            x-text="fmtVar(vl.key, a.vars[vl.key])"
-          ></p>
+          <span
+            class="w-1.5 h-1.5 rounded-full"
+            :class="{
+              'bg-emerald-400': (s.color || '').includes('emerald') || (s.color || '').includes('green'),
+              'bg-red-400': (s.color || '').includes('red'),
+              'bg-amber-400': (s.color || '').includes('amber'),
+              'bg-gray-400 dark:bg-gray-600': !s.color,
+            }"
+          ></span>
+          <span class="text-[13px] font-medium text-gray-500 dark:text-gray-400" x-text="s.display?.label || s.name"></span>
+          <span
+            class="text-[14px] font-display font-bold tracking-tight"
+            :class="{
+              'text-emerald-600 dark:text-emerald-400': (s.color || '').includes('emerald') || (s.color || '').includes('green'),
+              'text-red-600 dark:text-red-400': (s.color || '').includes('red'),
+              'text-amber-600 dark:text-amber-400': (s.color || '').includes('amber'),
+              'text-gray-400 dark:text-gray-500': !s.color,
+            }"
+            x-text="s.label || '—'"
+          ></span>
         </div>
       </template>
     </div>
 
-    <!-- ── Technical Indicators — Dynamic from Backend Config ── -->
+    <!-- SBS Session Breakout detail (inline — full context) -->
+    <template x-if="getSbsData(a)">
+      <div x-data="getSbsData(a)" class="flex items-center gap-2 ml-auto shrink-0 pl-3 border-l border-gray-200 dark:border-surface-400">
+        <span
+          x-show="session_label"
+          class="text-[12px] font-bold tracking-wider uppercase px-1.5 py-0.5 rounded tip-trigger"
+          @mouseenter="showTooltip('sessions', session_label, undefined, undefined, $event.target.closest('.tip-trigger'))"
+          @mouseleave="hideTooltip()"
+          :class="{
+            'bg-violet-500/15 text-violet-500 dark:text-violet-400': session_label === 'AS',
+            'bg-sky-500/15 text-sky-500 dark:text-sky-400': session_label === 'EU',
+            'bg-amber-500/15 text-amber-500 dark:text-amber-400': session_label === 'US',
+          }"
+          x-text="session_label"
+        ></span>
+        <!-- Phase badge: Opening / Breakout / Fade -->
+        <template x-if="phase && phase !== 'no_session'">
+          <span
+            class="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded tip-trigger"
+            @mouseenter="showTooltip('sbs', 'phase', undefined, undefined, $event.target.closest('.tip-trigger'))"
+            @mouseleave="hideTooltip()"
+            :class="{
+              'bg-sky-500/10 text-sky-500': phase === 'ib',
+              'bg-amber-500/10 text-amber-500': phase === 'breakout_window',
+              'bg-gray-500/10 text-gray-500': phase === 'post_window',
+            }"
+            x-text="phase === 'ib' ? 'Opening' : phase === 'breakout_window' ? 'Breakout' : 'Fade'"
+          ></span>
+        </template>
+        <!-- IB range with dollar width -->
+        <template x-if="ib_high !== null && ib_low !== null">
+          <span
+            class="text-[12px] font-mono text-gray-500 dark:text-gray-400 font-medium tip-trigger"
+            @mouseenter="showTooltip('sbs', 'ib_range', undefined, undefined, $event.target.closest('.tip-trigger'))"
+            @mouseleave="hideTooltip()"
+            x-text="'IB $' + ib_low?.toFixed(0) + '-$' + ib_high?.toFixed(0) + ' ($' + (ib_range || 0).toFixed(0) + ')'"
+          ></span>
+        </template>
+        <!-- Breakout direction -->
+        <template x-if="breakout_direction && breakout_direction !== 'none'">
+          <span
+            class="text-[12px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded tip-trigger"
+            @mouseenter="showTooltip('sbs', 'phase', undefined, undefined, $event.target.closest('.tip-trigger'))"
+            @mouseleave="hideTooltip()"
+            :class="{
+              'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400': breakout_direction === 'bullish' || breakout_direction === 'long',
+              'bg-red-500/15 text-red-600 dark:text-red-400': breakout_direction === 'bearish' || breakout_direction === 'short',
+            }"
+            x-text="breakout_direction"
+          ></span>
+        </template>
+        <template x-if="tp1 !== null && sl !== null">
+          <span
+            class="text-[12px] font-mono tip-trigger"
+            @mouseenter="showTooltip('sbs', 'tp1', undefined, undefined, $event.target.closest('.tip-trigger'))"
+            @mouseleave="hideTooltip()"
+          >
+            <span class="text-emerald-600 dark:text-emerald-400 font-semibold" x-text="'TP $' + tp1?.toFixed(0)"></span>
+            <span class="text-gray-300 dark:text-gray-600 mx-0.5">/</span>
+            <span class="text-red-600 dark:text-red-400 font-semibold" x-text="'SL $' + sl?.toFixed(0)"></span>
+          </span>
+        </template>
+        <!-- Distance from current price to IB midpoint -->
+        <template x-if="ib_high !== null && ib_low !== null && a.price > 0">
+          <span
+            class="text-[11px] font-mono font-medium tip-trigger"
+            @mouseenter="showTooltip('sbs', 'ib_range', undefined, undefined, $event.target.closest('.tip-trigger'))"
+            @mouseleave="hideTooltip()"
+            x-text="((a.price - ((ib_high + ib_low) / 2)) >= 0 ? '+' : '') + ((a.price - ((ib_high + ib_low) / 2))).toFixed(0) + ' from mid'"
+          ></span>
+        </template>
+        <!-- Minutes into session + estimated total -->
+        <template x-if="minutes_into_session > 0">
+          <span
+            class="text-[11px] font-mono text-gray-400 dark:text-gray-500 tip-trigger"
+            @mouseenter="showTooltip('sbs', 'minutes_into_session', undefined, undefined, $event.target.closest('.tip-trigger'))"
+            @mouseleave="hideTooltip()"
+            x-text="Math.floor(minutes_into_session) + 'm into ' + (session_label || 'session') + ' (~240m)'"
+          ></span>
+        </template>
+      </div>
+    </template>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════
+       S/R LEVELS BAR — Inline S/R with improved fonts
+       ═══════════════════════════════════════════════ -->
+  <div
+    class="flex items-center gap-5 sm:gap-8 px-5 py-3 border-t border-gray-100 dark:border-surface-400"
+    x-show="a.vars && (a.vars.resistance !== null || a.vars.support !== null)"
+  >
     <div
-      class="grid gap-0 divide-x divide-y divide-gray-100 dark:divide-surface-400 border-t border-gray-100 dark:border-surface-400"
-      :style="'grid-template-columns: repeat(' + (indicatorConfig?.grid_columns || 4) + ', minmax(0, 1fr))'"
+      class="flex items-center gap-2 tip-trigger"
+      @mouseenter="showTooltip('sr_levels', '_header', undefined, undefined, $event.target.closest('.tip-trigger'))"
+      @mouseleave="hideTooltip()"
+      @touchstart.prevent="showTooltip('sr_levels', '_header', undefined, undefined, $event.target.closest('.tip-trigger'))"
     >
-      <template x-for="tf in (indicatorConfig?.timeframes || [])" :key="tf.key">
-        <div class="px-3 sm:px-4 py-3 flex flex-col gap-1.5" :class="tfBgClass[tf.color] || ''">
-          <p
-            class="text-[10px] sm:text-[11px] uppercase tracking-[.15em] font-semibold"
-            :class="tfColorClass[tf.color] || 'text-gray-500'"
+      <span class="text-[13px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider">S/R</span>
+    </div>
+    <div class="flex items-center gap-5 sm:gap-8 min-w-0 flex-wrap">
+      <div
+        class="flex items-center gap-2 tip-trigger"
+        @mouseenter="showTooltip('sr_levels', 'tp', undefined, undefined, $event.target.closest('.tip-trigger'))"
+        @mouseleave="hideTooltip()"
+        @touchstart.prevent="showTooltip('sr_levels', 'tp', undefined, undefined, $event.target.closest('.tip-trigger'))"
+      >
+        <span class="text-[12px] font-bold text-emerald-500 dark:text-emerald-400 uppercase">TP</span>
+        <span
+          class="text-[16px] sm:text-[17px] font-display font-bold text-gray-700 dark:text-gray-200 tracking-tight"
+          x-text="isBearish(a) ? fmtVar('support', a.vars?.support) : fmtVar('resistance', a.vars?.resistance)"
+        ></span>
+      </div>
+      <div
+        class="flex items-center gap-2 tip-trigger"
+        @mouseenter="showTooltip('sr_levels', 'sl', undefined, undefined, $event.target.closest('.tip-trigger'))"
+        @mouseleave="hideTooltip()"
+        @touchstart.prevent="showTooltip('sr_levels', 'sl', undefined, undefined, $event.target.closest('.tip-trigger'))"
+      >
+        <span class="text-[12px] font-bold text-red-500 dark:text-red-400 uppercase">SL</span>
+        <span
+          class="text-[16px] sm:text-[17px] font-display font-bold text-gray-700 dark:text-gray-200 tracking-tight"
+          x-text="isBearish(a) ? fmtVar('resistance', a.vars?.resistance) : fmtVar('support', a.vars?.support)"
+        ></span>
+      </div>
+      <div
+        class="flex items-center gap-2 tip-trigger"
+        @mouseenter="showTooltip('sr_levels', 'tp2', undefined, undefined, $event.target.closest('.tip-trigger'))"
+        @mouseleave="hideTooltip()"
+        @touchstart.prevent="showTooltip('sr_levels', 'tp2', undefined, undefined, $event.target.closest('.tip-trigger'))"
+      >
+        <span class="text-[12px] font-semibold text-emerald-500/60 dark:text-emerald-400/60 uppercase">TP2</span>
+        <span
+          class="text-[15px] sm:text-[16px] font-display font-semibold text-gray-500 dark:text-gray-300 tracking-tight"
+          x-text="isBearish(a) ? fmtVar('support_secondary', a.vars?.support_secondary) : fmtVar('resistance_secondary', a.vars?.resistance_secondary)"
+        ></span>
+      </div>
+      <div
+        class="flex items-center gap-2 tip-trigger"
+        @mouseenter="showTooltip('sr_levels', 'sl2', undefined, undefined, $event.target.closest('.tip-trigger'))"
+        @mouseleave="hideTooltip()"
+        @touchstart.prevent="showTooltip('sr_levels', 'sl2', undefined, undefined, $event.target.closest('.tip-trigger'))"
+      >
+        <span class="text-[12px] font-semibold text-red-500/60 dark:text-red-400/60 uppercase">SL2</span>
+        <span
+          class="text-[15px] sm:text-[16px] font-display font-semibold text-gray-500 dark:text-gray-300 tracking-tight"
+          x-text="isBearish(a) ? fmtVar('resistance_secondary', a.vars?.resistance_secondary) : fmtVar('support_secondary', a.vars?.support_secondary)"
+        ></span>
+      </div>
+      <!-- Max Pain: Strike minimizing ITM payout — seller equilibrium -->
+      <div
+        x-show="a.vars && a.vars.max_pain != null && a.vars.max_pain > 0"
+        class="flex items-center gap-2 tip-trigger"
+        @mouseenter="showTooltip('sr_levels', 'max_pain', undefined, undefined, $event.target.closest('.tip-trigger'))"
+        @mouseleave="hideTooltip()"
+      >
+        <span class="text-[12px] font-bold text-amber-500 dark:text-amber-400 uppercase">MaxPain</span>
+        <span
+          class="text-[15px] sm:text-[16px] font-display font-semibold text-amber-600 dark:text-amber-300 tracking-tight"
+          x-text="fmtVar('max_pain', a.vars ? a.vars.max_pain : null)"
+        ></span>
+      </div>
+      <!-- Max Wall: Highest combined OI strike — the magnet/equilibrium -->
+      <div
+        x-show="a.vars && a.vars.max_wall != null && a.vars.max_wall > 0"
+        class="flex items-center gap-2 tip-trigger"
+        @mouseenter="showTooltip('sr_levels', 'max_wall', undefined, undefined, $event.target.closest('.tip-trigger'))"
+        @mouseleave="hideTooltip()"
+      >
+        <span class="text-[12px] font-bold text-violet-500 dark:text-violet-400 uppercase">Max Wall</span>
+        <span
+          class="text-[16px] sm:text-[17px] font-display font-bold tracking-tight"
+          :class="a.price && a.vars.max_wall > a.price ? 'text-emerald-600 dark:text-emerald-400' : a.price && a.vars.max_wall < a.price ? 'text-red-600 dark:text-red-400' : 'text-violet-600 dark:text-violet-300'"
+          x-text="fmtVar('max_wall', a.vars ? a.vars.max_wall : null)"
+        ></span>
+        <!-- Distance from price to max wall -->
+        <span
+          class="text-[10px] font-mono"
+          :class="a.price && a.vars.max_wall > a.price ? 'text-emerald-500/60' : a.price && a.vars.max_wall < a.price ? 'text-red-500/60' : 'text-gray-400'"
+          x-show="a.price && a.vars.max_wall > 0"
+          x-text="a.vars.max_wall ? ((a.vars.max_wall - a.price) >= 0 ? '+' : '') + ((a.vars.max_wall - a.price) / a.price * 100).toFixed(1) + '%' : ''"
+        ></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Whale Flow ── -->
+  <div
+    class="px-5 py-3 border-t border-gray-100 dark:border-surface-400"
+    x-show="a.vars && a.vars.whale_buy !== null"
+  >
+    <div class="flex items-center gap-4">
+      <span class="text-[12px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider shrink-0">Whale Flow</span>
+      <div class="flex-1 flex items-center gap-3 min-w-0">
+        <div
+          class="flex-1 flex items-center gap-2 min-w-0 tip-trigger"
+          @mouseenter="showTooltip('variables', 'whale_buy', undefined, undefined, $event.target.closest('.tip-trigger'))"
+          @mouseleave="hideTooltip()"
+          @touchstart.prevent="showTooltip('variables', 'whale_buy', undefined, undefined, $event.target.closest('.tip-trigger'))"
+        >
+          <span class="text-[11px] font-semibold text-emerald-500 dark:text-emerald-400 shrink-0">Buy</span>
+          <div class="flex-1 h-2.5 rounded-full bg-gray-100 dark:bg-surface-600 overflow-hidden">
+            <div
+              class="h-full rounded-full bg-emerald-500 transition-all duration-700"
+              :style="'width:' + Math.min(100, Math.max(5, ((a.vars?.whale_buy || 0) / Math.max(1, (a.vars?.whale_buy || 0) + (a.vars?.whale_sell || 0))) * 100)) + '%'"
+            ></div>
+          </div>
+          <span
+            class="text-[12px] font-mono font-semibold text-emerald-600 dark:text-emerald-400 shrink-0 w-16 text-right"
+            x-text="fmtVar('whale_buy', a.vars ? a.vars.whale_buy : null)"
+          ></span>
+        </div>
+        <div
+          class="flex-1 flex items-center gap-2 min-w-0 tip-trigger"
+          @mouseenter="showTooltip('variables', 'whale_sell', undefined, undefined, $event.target.closest('.tip-trigger'))"
+          @mouseleave="hideTooltip()"
+          @touchstart.prevent="showTooltip('variables', 'whale_sell', undefined, undefined, $event.target.closest('.tip-trigger'))"
+        >
+          <span class="text-[11px] font-semibold text-red-500 dark:text-red-400 shrink-0">Sell</span>
+          <div class="flex-1 h-2.5 rounded-full bg-gray-100 dark:bg-surface-600 overflow-hidden">
+            <div
+              class="h-full rounded-full bg-red-500 transition-all duration-700"
+              :style="'width:' + Math.min(100, Math.max(5, ((a.vars?.whale_sell || 0) / Math.max(1, (a.vars?.whale_buy || 0) + (a.vars?.whale_sell || 0))) * 100)) + '%'"
+            ></div>
+          </div>
+          <span
+            class="text-[12px] font-mono font-semibold text-red-600 dark:text-red-400 shrink-0 w-16 text-right"
+            x-text="fmtVar('whale_sell', a.vars ? a.vars.whale_sell : null)"
+          ></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════
+       TECHNICAL ANALYSIS — 2x2 Timeframe Grid
+       ═══════════════════════════════════════════════ -->
+  <div class="border-t border-gray-100 dark:border-surface-400 p-3 sm:p-4">
+    <div class="flex items-center justify-between mb-3">
+      <h3 class="text-[11px] font-semibold uppercase tracking-[.15em] text-gray-400 dark:text-gray-500">
+        Technical Analysis
+      </h3>
+      <div class="flex items-center gap-1.5">
+        <template x-for="tf in (indicatorConfig?.timeframes || [])" :key="tf.key">
+          <span
+            class="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider"
+            :class="{
+              'bg-sky-500/15 text-sky-500 dark:text-sky-400': tf.color === 'sky',
+              'bg-amber-500/15 text-amber-500 dark:text-amber-400': tf.color === 'amber',
+              'bg-emerald-500/15 text-emerald-500 dark:text-emerald-400': tf.color === 'emerald',
+              'bg-rose-500/15 text-rose-500 dark:text-rose-400': tf.color === 'rose',
+              'bg-violet-500/15 text-violet-500 dark:text-violet-400': tf.color === 'violet',
+            }"
             x-text="tf.label"
-          ></p>
-          <div class="flex flex-col gap-0.5">
+          ></span>
+        </template>
+      </div>
+    </div>
+
+    <!-- 2x2 Grid -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+      <template x-for="tf in (indicatorConfig?.timeframes || [])" :key="tf.key">
+        <div class="rounded-lg border border-gray-200/80 dark:border-surface-400 overflow-hidden bg-white/50 dark:bg-surface-800/50">
+          <!-- Timeframe label + legend -->
+          <div class="flex items-center justify-between px-3 py-2 border-b border-gray-100 dark:border-surface-400/50">
+            <span
+              class="text-[11px] font-bold uppercase tracking-[.12em]"
+              :class="tfColorClass[tf.color] || 'text-gray-500'"
+              x-text="tf.label"
+            ></span>
+            <div class="flex items-center gap-1.5 flex-wrap">
+              <template x-for="slot in (indicatorConfig?.indicators?.[tf.key] || []).slice(0, 8)" :key="slot.key">
+                <span class="flex items-center gap-1">
+                  <span class="w-2.5 h-2.5 rounded-sm inline-block shrink-0" :style="'background-color:' + (slot.chart_meta?.color || '#94a3b8')"></span>
+                  <span class="text-[10px] font-medium" :style="'color:' + (slot.chart_meta?.color || '#6b7280')" x-text="slot.label"></span>
+                </span>
+              </template>
+              <template x-if="(indicatorConfig?.indicators?.[tf.key] || []).length > 8">
+                <span class="text-[10px] text-gray-300 dark:text-gray-600" x-text="'+' + ((indicatorConfig?.indicators?.[tf.key] || []).length - 8)"></span>
+              </template>
+            </div>
+          </div>
+
+          <!-- Chart container -->
+          <div :id="'tf-' + a.symbol + '-' + tf.key" class="w-full">
+            <div
+              class="flex items-center justify-center text-[10px] text-gray-300 dark:text-gray-600"
+              style="height: 200px;"
+              x-show="!initialized"
+              x-text="loading ? 'Loading charts...' : ''"
+            ></div>
+          </div>
+
+          <!-- Indicator values row -->
+          <div class="flex items-center gap-2 px-3 py-1.5 overflow-x-auto border-t border-gray-50 dark:border-surface-400/30">
             <template x-for="slot in (indicatorConfig?.indicators?.[tf.key] || [])" :key="slot.key">
-              <div class="flex items-baseline justify-between gap-1">
+              <div class="flex items-center gap-1 shrink-0">
+                <span class="w-1.5 h-1.5 rounded-full shrink-0" :style="'background-color:' + (slot.chart_meta?.color || '#94a3b8')"></span>
+                <span class="text-[10px] font-medium text-gray-400 dark:text-gray-500" x-text="slot.label"></span>
                 <span
-                  class="text-[10px] sm:text-[11px] font-medium text-gray-400 dark:text-gray-500 w-20 shrink-0 truncate"
-                  x-text="slot.label"
-                ></span>
-                <span
-                  class="font-display tracking-tight leading-none shrink-0"
-                  :class="[slot.bold ? 'font-bold' : 'font-semibold', slotClass(slot, a)]"
-                  :style="'font-size:' + (slot.font_size || 'clamp(12px, 1.1vw, 14px)')"
+                  class="text-[13px] font-display font-semibold tracking-tight"
+                  :class="slotClass(slot, a)"
                   x-text="formatSlot(slot, a)"
                 ></span>
               </div>
@@ -101,259 +567,25 @@
           </div>
         </div>
       </template>
-
-      <!-- Fallback: if config not loaded yet -->
-      <template x-if="!indicatorConfig">
-        <div class="col-span-4 text-center py-4 text-[11px] text-gray-400 dark:text-gray-600">
-          Loading indicator config...
-        </div>
-      </template>
     </div>
-  </article>
+  </div>
 
   <!-- ═══════════════════════════════════════════════
-       RIGHT COLUMN — Decision Surface Panel
+       ACTION BAR
        ═══════════════════════════════════════════════ -->
-  <aside
-    class="decision-surface w-full lg:w-[280px] xl:w-[300px] shrink-0 rounded-xl lg:rounded-r-xl rounded-l-none lg:rounded-l-none border border-gray-200/80 dark:border-surface-300 lg:border-l-0 flex flex-col overflow-hidden"
-    :class="decisionSurfaceClass(a.decision)"
-  >
-    <!-- ── Options Signal (tooltip on hover) ── -->
-    <div
-      class="px-5 py-4 border-b border-white/15 tip-trigger"
-      @mouseenter="showTooltip('decisions', a.decision, undefined, undefined, $event.target.closest('.tip-trigger'))"
-      @mouseleave="hideTooltip()"
-      @touchstart.prevent="showTooltip('decisions', a.decision, undefined, undefined, $event.target.closest('.tip-trigger'))"
-    >
-      <div class="flex items-center gap-1.5 mb-1">
-        <p class="text-[11px] sm:text-[12px] uppercase tracking-[.15em] font-semibold text-white/60">Options Signal</p>
-        <svg class="w-3 h-3 text-white/30 shrink-0" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM8.94 6.94a.75.75 0 11-1.061-1.061 3.75 3.75 0 115.303 5.303l-2.122 2.122a.75.75 0 01-1.06-1.06l2.12-2.122a2.25 2.25 0 00-3.182-3.182z" clip-rule="evenodd"/></svg>
-      </div>
-      <p
-        class="font-display font-extrabold text-[30px] sm:text-[34px] tracking-tight leading-none drop-shadow-sm"
-        :class="a.decision === 'CONNECTING' ? 'connect-pulse' : ''"
-        x-text="a.decision"
-      ></p>
-    </div>
-
-    <!-- ── Strategies (tooltips on each strategy row) ── -->
-    <div class="px-5 py-3.5 border-b border-white/15 flex-1">
-      <div
-        class="flex items-center gap-1.5 mb-2 tip-trigger"
-        @mouseenter="showTooltip('strategies', '_generic', undefined, undefined, $event.target.closest('.tip-trigger'))"
-        @mouseleave="hideTooltip()"
-        @touchstart.prevent="showTooltip('strategies', '_generic', undefined, undefined, $event.target.closest('.tip-trigger'))"
-      >
-        <p class="text-[11px] sm:text-[12px] uppercase tracking-[.15em] font-semibold text-white/60">Strategies</p>
-        <svg class="w-3 h-3 text-white/30 shrink-0" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM8.94 6.94a.75.75 0 11-1.061-1.061 3.75 3.75 0 115.303 5.303l-2.122 2.122a.75.75 0 01-1.06-1.06l2.12-2.122a2.25 2.25 0 00-3.182-3.182z" clip-rule="evenodd"/></svg>
-      </div>
-
-      <div class="flex flex-col gap-2">
-        <template x-for="s in (a.strategies || [])" :key="s.key">
-          <div
-            class="flex items-center justify-between gap-2 tip-trigger"
-            @mouseenter="showTooltip('strategies', s.key, 'strategies', '_generic', $event.target.closest('.tip-trigger'))"
-            @mouseleave="hideTooltip()"
-            @touchstart.prevent="showTooltip('strategies', s.key, 'strategies', '_generic', $event.target.closest('.tip-trigger'))"
-          >
-            <div class="flex items-center gap-1">
-              <span class="text-[11px] sm:text-[12px] font-medium text-white/65 shrink-0" x-text="s.display.label"></span>
-              <svg class="w-2.5 h-2.5 text-white/25 shrink-0" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM8.94 6.94a.75.75 0 11-1.061-1.061 3.75 3.75 0 115.303 5.303l-2.122 2.122a.75.75 0 01-1.06-1.06l2.12-2.122a2.25 2.25 0 00-3.182-3.182z" clip-rule="evenodd"/></svg>
-            </div>
-            <span
-              class="font-display font-bold text-[15px] sm:text-[16px] tracking-tight truncate text-right"
-              :class="strategyItemColorClass(s.color)"
-              x-text="s.label || '—'"
-            ></span>
-          </div>
-        </template>
-        <template x-if="!a.strategies || a.strategies.length === 0">
-          <span class="font-display font-bold text-[15px] sm:text-[16px] text-white/40">—</span>
-        </template>
-      </div>
-
-      <!-- SBS Session Breakout detail (tooltips on each value) -->
-      <template x-if="getSbsData(a)">
-        <div x-data="getSbsData(a)" class="mt-3 pt-3 border-t border-white/15">
-          <div class="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11px] sm:text-[12px] leading-tight text-white/80">
-            <!-- Session label -->
-            <span
-              x-show="session_label"
-              class="font-bold tracking-wider uppercase tip-trigger"
-              @mouseenter="$store.dashboard.showTooltip('sessions', session_label, undefined, undefined, $event.target.closest('.tip-trigger'))"
-              @mouseleave="$store.dashboard.hideTooltip()"
-              :class="{
-                'text-violet-300': session_label === 'AS',
-                'text-sky-300': session_label === 'EU',
-                'text-amber-300': session_label === 'US',
-              }"
-              x-text="session_label"
-            ></span>
-            <span class="text-white/25" x-show="session_label">·</span>
-
-            <!-- IB Range -->
-            <template x-if="ib_high !== null && ib_low !== null">
-              <span
-                class="font-mono text-white/75 tip-trigger"
-                @mouseenter="$store.dashboard.showTooltip('sbs', 'ib_range', undefined, undefined, $event.target.closest('.tip-trigger'))"
-                @mouseleave="$store.dashboard.hideTooltip()"
-                x-text="'IB $' + ib_low?.toFixed(0) + '-$' + ib_high?.toFixed(0)"
-              ></span>
-            </template>
-
-            <!-- CME Gap -->
-            <template x-if="cme_gap !== null">
-              <span
-                class="font-mono tip-trigger"
-                @mouseenter="$store.dashboard.showTooltip('sbs', 'cme_gap', undefined, undefined, $event.target.closest('.tip-trigger'))"
-                @mouseleave="$store.dashboard.hideTooltip()"
-                :class="cme_gap > 0 ? 'text-emerald-300' : cme_gap < 0 ? 'text-red-300' : 'text-white/75'"
-                x-text="(cme_gap >= 0 ? '+' : '') + cme_gap.toFixed(2)"
-              ></span>
-            </template>
-
-            <!-- Minutes into session -->
-            <template x-if="phase !== 'no_session'">
-              <span
-                class="text-white/55 tip-trigger"
-                @mouseenter="$store.dashboard.showTooltip('sbs', 'minutes_into_session', undefined, undefined, $event.target.closest('.tip-trigger'))"
-                @mouseleave="$store.dashboard.hideTooltip()"
-                x-text="minutes_into_session + 'm'"
-              ></span>
-            </template>
-          </div>
-
-          <!-- Breakout TP/SL when active -->
-          <div
-            x-show="tp1 !== null && sl !== null"
-            class="flex items-center gap-2.5 mt-1.5 text-[11px] sm:text-[12px] font-mono"
-          >
-            <span
-              class="text-white/55 font-sans tip-trigger"
-              @mouseenter="$store.dashboard.showTooltip('sbs', 'tp1', undefined, undefined, $event.target.closest('.tip-trigger'))"
-              @mouseleave="$store.dashboard.hideTooltip()"
-            >TP</span>
-            <span class="font-bold text-emerald-200" x-text="'$' + tp1?.toFixed(0)"></span>
-            <span class="text-white/20">/</span>
-            <span
-              class="text-white/65 tip-trigger"
-              @mouseenter="$store.dashboard.showTooltip('sbs', 'tp2', undefined, undefined, $event.target.closest('.tip-trigger'))"
-              @mouseleave="$store.dashboard.hideTooltip()"
-              x-text="'$' + tp2?.toFixed(0)"
-            ></span>
-            <span class="text-white/20 ml-1">·</span>
-            <span
-              class="text-white/55 font-sans tip-trigger"
-              @mouseenter="$store.dashboard.showTooltip('sbs', 'sl_sbs', undefined, undefined, $event.target.closest('.tip-trigger'))"
-              @mouseleave="$store.dashboard.hideTooltip()"
-            >SL</span>
-            <span class="font-bold text-red-200" x-text="'$' + sl?.toFixed(0)"></span>
-          </div>
-        </div>
-      </template>
-    </div>
-
-    <!-- ── S/R Levels — Options Wall (tooltips on each level) ── -->
-    <div class="px-5 py-3.5 border-b border-white/15">
-      <div
-        class="flex items-center gap-1.5 mb-2.5 tip-trigger"
-        @mouseenter="showTooltip('sr_levels', '_header', undefined, undefined, $event.target.closest('.tip-trigger'))"
-        @mouseleave="hideTooltip()"
-        @touchstart.prevent="showTooltip('sr_levels', '_header', undefined, undefined, $event.target.closest('.tip-trigger'))"
-      >
-        <p class="text-[11px] sm:text-[12px] uppercase tracking-[.15em] font-semibold text-white/60">S/R Levels</p>
-        <svg class="w-3 h-3 text-white/30 shrink-0" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM8.94 6.94a.75.75 0 11-1.061-1.061 3.75 3.75 0 115.303 5.303l-2.122 2.122a.75.75 0 01-1.06-1.06l2.12-2.122a2.25 2.25 0 00-3.182-3.182z" clip-rule="evenodd"/></svg>
-      </div>
-
-      <div class="grid grid-cols-2 gap-x-5 gap-y-2">
-        <!-- TP -->
-        <div
-          class="tip-trigger"
-          @mouseenter="showTooltip('sr_levels', 'tp', undefined, undefined, $event.target.closest('.tip-trigger'))"
-          @mouseleave="hideTooltip()"
-          @touchstart.prevent="showTooltip('sr_levels', 'tp', undefined, undefined, $event.target.closest('.tip-trigger'))"
-        >
-          <div class="flex items-center gap-1">
-            <p class="text-[10px] sm:text-[11px] font-medium text-white/50 leading-none mb-0.5">TP</p>
-            <svg class="w-2.5 h-2.5 text-white/25 shrink-0" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM8.94 6.94a.75.75 0 11-1.061-1.061 3.75 3.75 0 115.303 5.303l-2.122 2.122a.75.75 0 01-1.06-1.06l2.12-2.122a2.25 2.25 0 00-3.182-3.182z" clip-rule="evenodd"/></svg>
-          </div>
-          <p
-            class="font-display font-bold text-[16px] sm:text-[17px] leading-none"
-            :class="isBearish(a) ? (a.vars.support ? '' : 'opacity-25') : (a.vars.resistance ? '' : 'opacity-25')"
-            x-text="isBearish(a) ? fmtVar('support', a.vars.support) : fmtVar('resistance', a.vars.resistance)"
-          ></p>
-        </div>
-        <!-- SL -->
-        <div
-          class="tip-trigger"
-          @mouseenter="showTooltip('sr_levels', 'sl', undefined, undefined, $event.target.closest('.tip-trigger'))"
-          @mouseleave="hideTooltip()"
-          @touchstart.prevent="showTooltip('sr_levels', 'sl', undefined, undefined, $event.target.closest('.tip-trigger'))"
-        >
-          <div class="flex items-center gap-1">
-            <p class="text-[10px] sm:text-[11px] font-medium text-white/50 leading-none mb-0.5">SL</p>
-            <svg class="w-2.5 h-2.5 text-white/25 shrink-0" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM8.94 6.94a.75.75 0 11-1.061-1.061 3.75 3.75 0 115.303 5.303l-2.122 2.122a.75.75 0 01-1.06-1.06l2.12-2.122a2.25 2.25 0 00-3.182-3.182z" clip-rule="evenodd"/></svg>
-          </div>
-          <p
-            class="font-display font-bold text-[16px] sm:text-[17px] leading-none"
-            :class="isBearish(a) ? (a.vars.resistance ? '' : 'opacity-25') : (a.vars.support ? '' : 'opacity-25')"
-            x-text="isBearish(a) ? fmtVar('resistance', a.vars.resistance) : fmtVar('support', a.vars.support)"
-          ></p>
-        </div>
-        <!-- TP2 -->
-        <div
-          class="tip-trigger"
-          @mouseenter="showTooltip('sr_levels', 'tp2', undefined, undefined, $event.target.closest('.tip-trigger'))"
-          @mouseleave="hideTooltip()"
-          @touchstart.prevent="showTooltip('sr_levels', 'tp2', undefined, undefined, $event.target.closest('.tip-trigger'))"
-        >
-          <div class="flex items-center gap-1">
-            <p class="text-[10px] sm:text-[11px] font-medium text-white/50 leading-none mb-0.5">TP2</p>
-            <svg class="w-2.5 h-2.5 text-white/25 shrink-0" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM8.94 6.94a.75.75 0 11-1.061-1.061 3.75 3.75 0 115.303 5.303l-2.122 2.122a.75.75 0 01-1.06-1.06l2.12-2.122a2.25 2.25 0 00-3.182-3.182z" clip-rule="evenodd"/></svg>
-          </div>
-          <p
-            class="font-display font-semibold text-[14px] sm:text-[15px] leading-none text-white/90"
-            :class="isBearish(a) ? (a.vars.support_secondary ? '' : 'opacity-25') : (a.vars.resistance_secondary ? '' : 'opacity-25')"
-            x-text="isBearish(a) ? fmtVar('support_secondary', a.vars.support_secondary) : fmtVar('resistance_secondary', a.vars.resistance_secondary)"
-          ></p>
-        </div>
-        <!-- SL2 -->
-        <div
-          class="tip-trigger"
-          @mouseenter="showTooltip('sr_levels', 'sl2', undefined, undefined, $event.target.closest('.tip-trigger'))"
-          @mouseleave="hideTooltip()"
-          @touchstart.prevent="showTooltip('sr_levels', 'sl2', undefined, undefined, $event.target.closest('.tip-trigger'))"
-        >
-          <div class="flex items-center gap-1">
-            <p class="text-[10px] sm:text-[11px] font-medium text-white/50 leading-none mb-0.5">SL2</p>
-            <svg class="w-2.5 h-2.5 text-white/25 shrink-0" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM8.94 6.94a.75.75 0 11-1.061-1.061 3.75 3.75 0 115.303 5.303l-2.122 2.122a.75.75 0 01-1.06-1.06l2.12-2.122a2.25 2.25 0 00-3.182-3.182z" clip-rule="evenodd"/></svg>
-          </div>
-          <p
-            class="font-display font-semibold text-[14px] sm:text-[15px] leading-none text-white/90"
-            :class="isBearish(a) ? (a.vars.resistance_secondary ? '' : 'opacity-25') : (a.vars.support_secondary ? '' : 'opacity-25')"
-            x-text="isBearish(a) ? fmtVar('resistance_secondary', a.vars.resistance_secondary) : fmtVar('support_secondary', a.vars.support_secondary)"
-          ></p>
-        </div>
-      </div>
-    </div>
-
-    <!-- ── Action Buttons ── -->
-    <div class="px-5 py-4 flex items-center gap-2.5">
-      <button
-        class="flex-1 py-3 rounded-lg bg-white/20 hover:bg-white/30 active:bg-white/35 text-white font-display font-bold text-[15px] tracking-wide transition-colors border border-white/15"
-        :disabled="a.decision === 'CONNECTING'"
-        :class="a.decision === 'CONNECTING' ? 'opacity-25 cursor-not-allowed' : 'cursor-pointer'"
-      >BUY</button>
-      <button
-        class="flex-1 py-3 rounded-lg bg-white/20 hover:bg-white/30 active:bg-white/35 text-white font-display font-bold text-[15px] tracking-wide transition-colors border border-white/15"
-        :disabled="a.decision === 'CONNECTING'"
-        :class="a.decision === 'CONNECTING' ? 'opacity-25 cursor-not-allowed' : 'cursor-pointer'"
-      >SELL</button>
-      <button
-        class="py-3 px-4 rounded-lg bg-transparent hover:bg-white/10 text-white/70 hover:text-white font-display font-semibold text-[15px] transition-colors"
-        :disabled="a.decision === 'CONNECTING'"
-        :class="a.decision === 'CONNECTING' ? 'opacity-25 cursor-not-allowed' : 'cursor-pointer'"
-      >✕</button>
-    </div>
-  </aside>
-</div>
+  <div class="flex items-center gap-2.5 px-5 py-3.5 border-t border-gray-100 dark:border-surface-400 bg-gray-50/50 dark:bg-surface-800/30">
+    <button
+      class="flex-1 py-2.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 active:bg-emerald-500/25 text-emerald-600 dark:text-emerald-400 font-display font-bold text-[14px] tracking-wide transition-colors border border-emerald-500/15"
+      :disabled="a.decision === 'CONNECTING'"
+      :class="a.decision === 'CONNECTING' ? 'opacity-25 cursor-not-allowed' : 'cursor-pointer'"
+    >BUY</button>
+    <button
+      class="flex-1 py-2.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 active:bg-red-500/25 text-red-600 dark:text-red-400 font-display font-bold text-[14px] tracking-wide transition-colors border border-red-500/15"
+      :disabled="a.decision === 'CONNECTING'"
+      :class="a.decision === 'CONNECTING' ? 'opacity-25 cursor-not-allowed' : 'cursor-pointer'"
+    >SELL</button>
+    <button
+      class="py-2.5 px-4 rounded-lg bg-transparent hover:bg-gray-200/60 dark:hover:bg-surface-600 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 font-display font-semibold text-[14px] transition-colors"
+    >Dismiss</button>
+  </div>
+</article>

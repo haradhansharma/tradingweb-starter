@@ -10,7 +10,7 @@ from django.http import HttpResponse, JsonResponse
 from typing import Optional
 import redis.asyncio as aioredis
 from django.conf import settings
-
+import logging
 from apps.common.assets import get_assets_async
 from apps.common.indicator_engine import IndicatorEngine
 from apps.common.broker_config import (
@@ -22,7 +22,7 @@ from apps.common.broker_config import (
 
 # Import the auth router
 from api.auth_router import auth_router
-
+logger = logging.getLogger("api.router")
 # Import the shared API instance (NinjaAPI)
 api = NinjaAPI(
     title="WebTrading Options Intelligence API",
@@ -88,7 +88,21 @@ async def active_underlyings(request, broker: str = Query(DEFAULT_BROKER)):
             if oi and mp
         ]
         if validated:
+            # All or some candidates have live OI + markPrice — use validated only.
+            # Non-options assets (DOGE, XRP, etc.) are excluded.
             candidates = validated
+        else:
+            # Startup phase: REST sync hasn't populated caches yet, or all caches
+            # expired simultaneously. Return exchange-info candidates so the
+            # frontend can show assets and subscribe to WS immediately.
+            # Safety net: the intelligence pipeline (redis_bridge) now broadcasts
+            # `insufficient_data` for assets without OI/index, which triggers
+            # _removeAsset() on the frontend — properly evicting non-options
+            # assets within seconds of the first markPrice event.
+            logger.info(
+                "active-underlyings: no candidates passed OI+markPrice validation, "
+                f"returning all {len(candidates)} exchange-info candidates (startup fallback)"
+            )
 
     return {
         "active_underlyings": candidates,
@@ -164,6 +178,87 @@ async def indicator_config(request):
     """
     config = IndicatorEngine.get_display_config()
     return config
+
+@router.get("/klines/{underlying}")
+async def get_klines(request, underlying: str, interval: str = "1m", limit: int = 100, broker: str = Query(DEFAULT_BROKER)):
+    """
+    Fetch kline/candlestick data from the local Redis KlineStore.
+    The store is continuously updated by the futures_streamer management
+    command via broker WS and REST seed — no live broker API calls here.
+    """
+    from apps.common.kline_store import KlineStore
+
+    try:
+        r = get_redis_client()
+        store = KlineStore(cache_client=r, broker=broker)
+        candles = await store.get_candles(underlying, interval, min(limit, 500))
+
+        # Strip extra fields — frontend only needs OHLCV
+        result = [
+            {"t": c["t"], "o": c["o"], "h": c["h"], "l": c["l"], "c": c["c"], "v": c["v"]}
+            for c in candles
+        ]
+
+        return {"candles": result, "count": len(result)}
+    except Exception as e:
+        return {"error": str(e), "candles": [], "count": 0}
+
+
+@router.get("/indicator-series/{underlying}")
+async def get_indicator_series(
+    request,
+    underlying: str,
+    broker: str = Query(DEFAULT_BROKER),
+    limit: int = Query(100),
+):
+    """
+    Compute full indicator time-series for chart rendering.
+
+    Returns all registered indicators as { time, value } arrays — one per
+    indicator key — ready to feed directly into Lightweight Charts setData().
+
+    The frontend does NOT compute indicators.  All calculation happens here
+    via pandas-ta.  Adding a new indicator to INDICATOR_REGISTRY makes it
+    appear here automatically — zero frontend changes.
+
+    Response:
+    {
+        "series": {
+            "1m_rsi_14":   [{ "time": 1700000000, "value": 62.4 }, ...],
+            "1m_ema_9":    [{ "time": 1700000000, "value": 98900 }, ...],
+            "15m_stoch_k": [{ "time": 1700000100, "value": 72.5 }, ...],
+            ...
+        }
+    }
+    """
+    from apps.common.kline_store import KlineStore
+
+    try:
+        r = get_redis_client()
+        store = KlineStore(cache_client=r, broker=broker)
+
+        # Gather candles for all timeframes that have registered indicators
+        engine = IndicatorEngine()
+        all_tfs = set()
+        for cfg in engine.registry.values():
+            for tf in cfg.get("timeframes", []):
+                all_tfs.add(tf)
+
+        candles_by_tf = {}
+        for tf in sorted(all_tfs):
+            candles = await store.get_candles(underlying, tf, limit=min(limit, 500))
+            if candles and len(candles) >= 5:
+                candles_by_tf[tf] = candles
+
+        if not candles_by_tf:
+            return {"series": {}}
+
+        # Compute full time-series
+        series = engine.calculate_all_series(candles_by_tf)
+        return {"series": series}
+
+    except Exception as e:
+        return {"error": str(e), "series": {}}
 
 # Register the router under the /market prefix
 api.add_router("/market", router)

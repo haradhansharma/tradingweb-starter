@@ -23,9 +23,9 @@ import asyncio
 import logging
 from django.core.management.base import BaseCommand
 
-from apps.common.broker_config import BROKER_CONFIGS
-from apps.common.binance_connector import OptionsConnector
-from apps.common.assets import get_assets_sync
+from common.broker_config import BROKER_CONFIGS
+from common.binance_connector import OptionsConnector
+from common.assets import get_assets_sync
 from django.conf import settings
 
 logger = logging.getLogger("options.streamer")

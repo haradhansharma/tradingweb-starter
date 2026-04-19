@@ -45,7 +45,8 @@ const { title = 'MarketPulse' } = Astro.props;
       }
 
       document.addEventListener('alpine:init', () => {
-        (window as any).Alpine.data('auth', () => authStore);
+        // Auth store — globally accessible as $store.auth in Alpine templates
+        (window as any).Alpine.store('auth', authStore);
         (window as any).getAlpineStore = getAlpineStore;
       });
 

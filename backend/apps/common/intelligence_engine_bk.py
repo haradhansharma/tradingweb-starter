@@ -38,6 +38,7 @@ WEIGHTS = {
 
 # Thresholds — all configurable in one place
 THRESHOLDS = {
+    "whale_block_usd": 50000,  # Minimum block trade notional to qualify
     "pcr_bullish": 1.0,  # PCR above this → bullish
     "pcr_bearish": 0.7,  # PCR below this → bearish
     "gex_positive": 0,  # GEX above this → bullish
@@ -134,12 +135,7 @@ class OptionIntelligenceEngine:
         # 2. VARIABLE CALCULATIONS (filtered data only)
         pcr = self._calculate_pcr(oi_data)
         max_pain = self._calculate_max_pain(oi_data, spot)
-        max_wall = self._calculate_max_wall(oi_data, spot)
         walls = self._calculate_walls(oi_data, spot)
-        logger.debug(
-            f"[Intel] {asset}: spot={spot}, max_pain={max_pain}, max_wall={max_wall}, "
-            f"oi_records={len(oi_data)}"
-        )
         whale_buy, whale_sell = self._calculate_whale_activity(trade_data, cs)
         total_gex = self._calculate_gex(mark_data, oi_data, spot, cs)
         skew = self._calculate_skew(mark_data, spot)
@@ -201,7 +197,6 @@ class OptionIntelligenceEngine:
             "metrics": {
                 "pcr": round(pcr, 4),
                 "max_pain": max_pain,
-                "max_wall": max_wall,
                 "whale_buy_volume": round(whale_buy, 2),
                 "whale_sell_volume": round(whale_sell, 2),
                 "whale_net_volume": round(whale_buy - whale_sell, 2),
@@ -279,16 +274,8 @@ class OptionIntelligenceEngine:
         # Previous: any block trade data (buy>0 or sell>0) added ±40 to both
         # max_pos and max_neg, inflating the normalization denominator even
         # when no whale signal triggered (e.g., $10k buy < $50k threshold).
-        #
-        # Dynamic threshold: scales with asset price so that whale signal
-        # discrimination is meaningful across BTC ($95K spot → ~$47K bar)
-        # and smaller assets ($180 SOL → $10K floor).  Without this, a
-        # static $50K would always fire for large caps (no signal value)
-        # and never fire for small caps (permanently dead signal).
-        WHALE_FLOOR = 10_000  # absolute minimum: $10K
-        whale_threshold = max(WHALE_FLOOR, spot * 0.5)
-        whale_buy_fires = whale_buy > whale_threshold
-        whale_sell_fires = whale_sell > whale_threshold
+        whale_buy_fires = whale_buy > t["whale_block_usd"]
+        whale_sell_fires = whale_sell > t["whale_block_usd"]
         has_whale_data = whale_buy > 0 or whale_sell > 0
         if has_whale_data:
             if whale_buy_fires:
@@ -466,58 +453,6 @@ class OptionIntelligenceEngine:
                 max_pain_strike = candidate_k
 
         return max_pain_strike
-
-    def _calculate_max_wall(self, oi_data: List[Dict], spot: float) -> float:
-        """
-        MAX WALL: The strike with the highest combined open interest (call_oi + put_oi)
-        across all strikes. This is the strongest OI concentration — the "wall" that
-        price gravitates toward like a magnet (equilibrium point).
-
-        Unlike Max Pain (which minimizes ITM payout), Max Wall is purely based on
-        where the most contracts are concentrated. High OI = heavy hedging =
-        market makers defend this level.
-
-        Returns the strike price of the Max Wall.
-        """
-        if not oi_data:
-            logger.debug("[MaxWall] No OI data provided")
-            return 0
-
-        # Aggregate total OI per strike (call + put combined)
-        strike_total_oi = defaultdict(float)
-        parsed_ok = 0
-        parse_fail = 0
-        for x in oi_data:
-            sym = x.get("symbol", "")
-            parts = sym.split("-")
-            if len(parts) < 3:
-                parse_fail += 1
-                continue
-            try:
-                strike = float(parts[2])
-            except (ValueError, IndexError):
-                parse_fail += 1
-                continue
-            oi_val = float(x.get("oi_contracts", 0))
-            if oi_val > 0:
-                strike_total_oi[strike] += oi_val
-                parsed_ok += 1
-
-        if not strike_total_oi:
-            logger.warning(
-                f"[MaxWall] No valid OI entries found. "
-                f"Total OI records: {len(oi_data)}, parsed_ok: {parsed_ok}, parse_fail: {parse_fail}. "
-                f"Sample symbols: {[x.get('symbol', '')[:30] for x in oi_data[:3]]}"
-            )
-            return 0
-
-        # Find strike with highest total OI
-        max_wall_strike = max(strike_total_oi, key=strike_total_oi.get)
-        logger.debug(
-            f"[MaxWall] Strike={max_wall_strike}, OI={strike_total_oi[max_wall_strike]:.0f}, "
-            f"spot={spot}, entries={len(strike_total_oi)}"
-        )
-        return max_wall_strike
 
     def _calculate_walls(self, oi_data: List[Dict], spot: float) -> Dict:
         """

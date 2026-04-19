@@ -11,8 +11,7 @@ Lifecycle:
 
 Redis usage:
   DB0 (Cache): kline data + indicator values
-  DB3 (Pub/Sub): "indicators:{SYMBOL}" channel
-  DB2 (Channels): "BTCUSDT_indicators" group → frontend WS
+  DB2 (Channels): Django Channels group → frontend WS
 """
 
 import asyncio
@@ -40,6 +39,7 @@ logger = logging.getLogger("futures.orchestrator")
 
 # Category constant for Channels broadcast
 CATEGORY_INDICATORS = "indicators"
+CATEGORY_FUTURES_PRICE = "futuresPrice"
 
 # How many 1m candles to seed from REST (max per Binance request = 1500)
 SEED_1M_COUNT = 1500
@@ -63,8 +63,7 @@ class FuturesOrchestrator:
         self.connector = FuturesConnector(broker=broker)
         self.store: Optional[KlineStore] = None
         self.engine = IndicatorEngine()
-        self.cache: Optional[aioredis.Redis] = None
-        self.pubsub: Optional[aioredis.Redis] = None
+        self.cache: Optional[aioredis.Redis] = None     
         self.channel_layer = None
         self.symbols: list = []
         self.broker = broker
@@ -76,11 +75,9 @@ class FuturesOrchestrator:
         self.cache = aioredis.from_url(
             settings.CACHES["default"]["LOCATION"], decode_responses=True
         )
-        self.pubsub = aioredis.from_url(
-            settings.REDIS_PUBSUB_URL, decode_responses=True
-        )
+       
         self.channel_layer = get_channel_layer()
-        self.store = KlineStore(self.cache, self.pubsub, broker=self.broker)
+        self.store = KlineStore(self.cache, broker=self.broker)
 
     async def close(self):
         """Release all connections."""
@@ -89,11 +86,7 @@ class FuturesOrchestrator:
                 await self.cache.aclose()
         except Exception:
             pass
-        try:
-            if self.pubsub:
-                await self.pubsub.aclose()
-        except Exception:
-            pass
+        
 
     # ------------------------------------------------------------------
     # Public API
@@ -113,7 +106,8 @@ class FuturesOrchestrator:
 
         # Register callbacks
         self.connector.on_candle_complete = self._on_candle_complete
-
+        self.connector.on_price_tick = self._on_price_tick
+        
         # Step 1: Seed historical data from REST
         await self._seed_history()
 
@@ -204,6 +198,39 @@ class FuturesOrchestrator:
         # Recalculate indicators for this symbol
         await self._recalculate_indicators(symbol)
 
+    
+    async def _on_price_tick(self, symbol: str, price: float):
+        """
+        Called on every kline tick (even incomplete candles).
+        Publishes the live futures price via Django Channels to frontend.
+        Throttled to ~1 update/sec per symbol to avoid flooding.
+        """
+        now = __import__("time").time()
+        # Throttle: max 1 broadcast per second per symbol
+        last_key = f"_last_futures_price_tick_{symbol}"
+        last_tick = getattr(self, last_key, 0)
+        if now - last_tick < 1.0:
+            return
+        setattr(self, last_key, now)
+
+        if not self.channel_layer:
+            return
+
+        payload = {
+            "category": CATEGORY_FUTURES_PRICE,
+            "underlying": symbol,
+            "broker": self.broker,
+            "data": {"p": str(price)},
+        }
+        group_name = ws_group_name(self.broker, symbol, CATEGORY_FUTURES_PRICE)
+        try:
+            await self.channel_layer.group_send(
+                group_name,
+                {"type": "market.update", "payload": payload},
+            )
+        except Exception as e:
+            logger.debug(f"Futures price broadcast failed for {symbol}: {e}")
+
     # ------------------------------------------------------------------
     # Market Session Publisher
     # ------------------------------------------------------------------
@@ -238,17 +265,6 @@ class FuturesOrchestrator:
                         )
                     except Exception as e:
                         logger.debug(f"Session channel broadcast failed: {e}")
-
-                # Also publish via Pub/Sub (DB3) for other backend consumers
-                if self.pubsub:
-                    try:
-                        session_channel = redis_key(self.broker, "_global", "sessions")
-                        await self.pubsub.publish(
-                            session_channel,
-                            json.dumps(payload)
-                        )
-                    except Exception as e:
-                        logger.debug(f"Session pub/sub publish failed: {e}")
 
                 # Cache session state in DB0 for backend strategy/decision reads.
                 # Key: "sessions:global" with 120s TTL (auto-refreshed every 30s).
@@ -326,23 +342,7 @@ class FuturesOrchestrator:
         ws_data = {
             "values": values,
             "strategies": strategies,
-        }
-
-        # --- Publish to Pub/Sub (DB3) ---
-        if self.pubsub:
-            try:
-                payload = {
-                    "category": CATEGORY_INDICATORS,
-                    "underlying": symbol,
-                    "broker": self.broker,
-                    "data": ws_data,
-                }
-                await self.pubsub.publish(
-                    redis_key(self.broker, symbol, "indicators"),
-                    json.dumps(payload)
-                )
-            except Exception as e:
-                logger.debug(f"Pub/Sub publish failed for {symbol}: {e}")
+        }        
 
         # --- Broadcast via Django Channels (DB2) → Frontend WS ---
         if self.channel_layer:

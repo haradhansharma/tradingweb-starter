@@ -1,0 +1,200 @@
+---
+/**
+ * Profile Page — MarketPulse
+ * ===========================
+ * User profile information and notification preferences.
+ * Requires authentication (DashboardLayout handles guard).
+ */
+import DashboardLayout from '../../layouts/DashboardLayout.astro';
+---
+
+<DashboardLayout title="Profile — MarketPulse">
+  <div class="p-5 space-y-5 max-w-[900px]">
+    <!-- Header -->
+    <div>
+      <h1 class="text-lg font-semibold text-white" style="font-family: 'Space Grotesk', sans-serif;">Profile</h1>
+      <p class="text-xs text-gray-500 mt-0.5">Your account information and notification preferences</p>
+    </div>
+
+    <!-- Profile Card -->
+    <div class="bg-[#1a1d27] border border-[#2a2d3a] rounded-xl p-5">
+      <h2 class="text-sm font-semibold text-gray-200 mb-4" style="font-family: 'Space Grotesk', sans-serif;">
+        Account Information
+      </h2>
+
+      <div x-show="$store.auth.isAuthenticated">
+        <div class="grid grid-cols-2 gap-x-6 gap-y-4 text-sm">
+          <div>
+            <span class="text-xs text-gray-500 uppercase tracking-wider">Username</span>
+            <p class="text-gray-200 mt-0.5" x-text="$store.auth.username"></p>
+          </div>
+          <div>
+            <span class="text-xs text-gray-500 uppercase tracking-wider">Email</span>
+            <p class="text-gray-200 mt-0.5" x-text="$store.auth.user?.email || 'Not set'"></p>
+          </div>
+          <div>
+            <span class="text-xs text-gray-500 uppercase tracking-wider">Risk Tolerance</span>
+            <p class="text-gray-200 mt-0.5 capitalize" x-text="$store.auth.user?.risk_tolerance || 'moderate'"></p>
+          </div>
+          <div>
+            <span class="text-xs text-gray-500 uppercase tracking-wider">Status</span>
+            <p class="mt-0.5">
+              <span
+                class="text-xs px-2 py-0.5 rounded"
+                :class="$store.auth.user?.is_verified ? 'bg-emerald-900/50 text-emerald-400' : 'bg-amber-900/50 text-amber-400'"
+                x-text="$store.auth.user?.is_verified ? 'Verified' : 'Unverified'"
+              ></span>
+            </p>
+          </div>
+          <div>
+            <span class="text-xs text-gray-500 uppercase tracking-wider">Account ID</span>
+            <p class="text-gray-200 mt-0.5" x-text="$store.auth.user?.id ? '#' + $store.auth.user.id : '—'"></p>
+          </div>
+          <div>
+            <span class="text-xs text-gray-500 uppercase tracking-wider">Tracked Assets</span>
+            <p class="text-gray-200 mt-0.5" x-text="$store.auth.user?.tracked_assets?.length ? $store.auth.user.tracked_assets.join(', ') : 'Default (all)'"></p>
+          </div>
+        </div>
+      </div>
+
+      <div x-show="!$store.auth.isAuthenticated" class="text-center py-6 text-gray-500 text-sm">
+        <p>Please <a href="/auth/login" class="text-blue-400 hover:text-blue-300 no-underline">sign in</a> to view your profile.</p>
+      </div>
+    </div>
+
+    <!-- Notification Preferences Card -->
+    <div class="bg-[#1a1d27] border border-[#2a2d3a] rounded-xl p-5" x-data="notifToggles()">
+      <h2 class="text-sm font-semibold text-gray-200 mb-1" style="font-family: 'Space Grotesk', sans-serif;">
+        Notification Preferences
+      </h2>
+      <p class="text-xs text-gray-500 mb-4">Control which alerts you receive</p>
+
+      <div x-show="$store.auth.isAuthenticated">
+        <div class="flex flex-col gap-3">
+          <label class="flex items-center justify-between cursor-pointer">
+            <div>
+              <span class="text-sm text-gray-200">Strong Signals</span>
+              <p class="text-[11px] text-gray-500 mt-0.5">Get notified when strong buy/sell signals are detected</p>
+            </div>
+            <div class="relative">
+              <input type="checkbox"
+                :checked="$store.auth.user?.notify_strong_signals ?? true"
+                @change="togglePref('notify_strong_signals', $event.target.checked)"
+                class="sr-only peer"
+              >
+              <div class="w-8 h-[18px] bg-surface-600 rounded-full peer peer-checked:bg-emerald-600 transition-colors"></div>
+              <div class="absolute top-0.5 left-0.5 w-3.5 h-3.5 bg-white rounded-full transition-transform peer-checked:translate-x-3.5"></div>
+            </div>
+          </label>
+
+          <label class="flex items-center justify-between cursor-pointer">
+            <div>
+              <span class="text-sm text-gray-200">Whale Activity</span>
+              <p class="text-[11px] text-gray-500 mt-0.5">Large institutional order flow alerts</p>
+            </div>
+            <div class="relative">
+              <input type="checkbox"
+                :checked="$store.auth.user?.notify_whale_activity ?? true"
+                @change="togglePref('notify_whale_activity', $event.target.checked)"
+                class="sr-only peer"
+              >
+              <div class="w-8 h-[18px] bg-surface-600 rounded-full peer peer-checked:bg-emerald-600 transition-colors"></div>
+              <div class="absolute top-0.5 left-0.5 w-3.5 h-3.5 bg-white rounded-full transition-transform peer-checked:translate-x-3.5"></div>
+            </div>
+          </label>
+
+          <label class="flex items-center justify-between cursor-pointer">
+            <div>
+              <span class="text-sm text-gray-200">Market Shifts</span>
+              <p class="text-[11px] text-gray-500 mt-0.5">Significant market regime changes and session transitions</p>
+            </div>
+            <div class="relative">
+              <input type="checkbox"
+                :checked="$store.auth.user?.notify_market_shifts ?? true"
+                @change="togglePref('notify_market_shifts', $event.target.checked)"
+                class="sr-only peer"
+              >
+              <div class="w-8 h-[18px] bg-surface-600 rounded-full peer peer-checked:bg-emerald-600 transition-colors"></div>
+              <div class="absolute top-0.5 left-0.5 w-3.5 h-3.5 bg-white rounded-full transition-transform peer-checked:translate-x-3.5"></div>
+            </div>
+          </label>
+        </div>
+
+        <div x-show="saved" x-transition class="text-xs text-emerald-400 mt-3">
+          Preferences saved successfully
+        </div>
+        <div x-show="error" x-transition class="text-xs text-red-400 mt-3" x-text="error"></div>
+      </div>
+
+      <div x-show="!$store.auth.isAuthenticated" class="text-center py-4 text-gray-500 text-sm">
+        <p>Please <a href="/auth/login" class="text-blue-400 hover:text-blue-300 no-underline">sign in</a> to manage notifications.</p>
+      </div>
+    </div>
+
+    <!-- Quick links -->
+    <div class="flex gap-3">
+      <a href="/credentials" class="flex items-center gap-2 px-3 py-2 bg-[#1a1d27] border border-[#2a2d3a] rounded-lg text-xs text-gray-300 hover:text-white hover:border-surface-400 transition-all no-underline">
+        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/>
+        </svg>
+        API Credentials
+      </a>
+      <a href="/settings" class="flex items-center gap-2 px-3 py-2 bg-[#1a1d27] border border-[#2a2d3a] rounded-lg text-xs text-gray-300 hover:text-white hover:border-surface-400 transition-all no-underline">
+        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.604.852.997 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+        </svg>
+        Change Password
+      </a>
+    </div>
+
+    <div class="h-6"></div>
+  </div>
+</DashboardLayout>
+
+<script>
+  document.addEventListener('alpine:init', () => {
+    Alpine.data('notifToggles', () => {
+      return {
+        saved: false,
+        error: null,
+        _timer: null as any,
+
+        async togglePref(field: string, value: boolean) {
+          this.error = null;
+          this.saved = false;
+          if (this._timer) clearTimeout(this._timer);
+
+          const auth = (window as any).getAlpineStore().getAuthStore();
+          const token = localStorage.getItem('mp_access_token');
+          if (!token) return;
+
+          try {
+            const resp = await fetch('/api/auth/me', {
+              method: 'PUT',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + token,
+              },
+              body: JSON.stringify({ [field]: value }),
+            });
+
+            if (resp.ok) {
+              // Update local auth store optimistically
+              if (auth.user) {
+                (auth.user as any)[field] = value;
+              }
+              this.saved = true;
+              this._timer = setTimeout(() => { this.saved = false; }, 2500);
+            } else {
+              const data = await resp.json().catch(() => ({}));
+              this.error = data.message || 'Failed to save preference';
+            }
+          } catch (e) {
+            this.error = 'Network error. Please try again.';
+          }
+        },
+      };
+    });
+  });
+</script>

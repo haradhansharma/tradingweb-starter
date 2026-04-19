@@ -32,7 +32,7 @@ from .broker_config import (
     redis_key,
     redis_global_key,
     ws_group_name,
-    pubsub_channel,
+    # pubsub_channel,
     DEFAULT_BROKER,
 )
 
@@ -67,7 +67,7 @@ class RedisBridge:
     def __init__(self, broker: str = DEFAULT_BROKER):
         self.broker = broker
         self.cache = aioredis.from_url(settings.CACHES["default"]["LOCATION"])
-        self.pubsub = aioredis.from_url(settings.REDIS_PUBSUB_URL)
+        # self.pubsub = aioredis.from_url(settings.REDIS_PUBSUB_URL)
         self.channel_layer = get_channel_layer()
         self.engine = OptionIntelligenceEngine()
         self.last_intel_time: Dict[str, float] = {}  # {underlying: timestamp}
@@ -80,10 +80,10 @@ class RedisBridge:
             await self.cache.aclose()
         except Exception as e:
             logger.warning(f"Error closing cache connection: {e}")
-        try:
-            await self.pubsub.aclose()
-        except Exception as e:
-            logger.warning(f"Error closing pubsub connection: {e}")
+        # try:
+        #     await self.pubsub.aclose()
+        # except Exception as e:
+        #     logger.warning(f"Error closing pubsub connection: {e}")
 
     # ------------------------------------------------------------------
     # Public: broadcast
@@ -135,11 +135,11 @@ class RedisBridge:
                 )
 
             # Pub/Sub (raw for external consumers)
-            tasks.append(
-                self.pubsub.publish(
-                    pubsub_channel(self.broker, underlying, category), raw_payload
-                )
-            )
+            # tasks.append(
+            #     self.pubsub.publish(
+            #         pubsub_channel(self.broker, underlying, category), raw_payload
+            #     )
+            # )
 
             # Channel Layer group send
             tasks.append(
@@ -267,12 +267,10 @@ class RedisBridge:
             # WS OI events no longer write to cache to prevent incremental data
             # from overwriting the authoritative REST snapshot (Issue #2).
             #
-            # If OI/index is missing here, it means REST sync hasn't populated
-            # the cache yet (fresh start) or the key expired. Rather than
-            # broadcasting `insufficient_data` (which triggers _removeAsset()
-            # on the frontend), we skip silently. The asset stays CONNECTING
-            # and the 15s CONNECTING timeout is the proper safety net for
-            # permanently-missing data.
+            # If OI/index is missing, this asset has no tradeable options data.
+            # Broadcast insufficient_data so the frontend can remove it from
+            # the active list. Without this, non-options assets (e.g. DOGE, XRP)
+            # stay frozen in CONNECTING with stale/null vars.
             if not index_payload or not oi_payload:
                 missing = []
                 if not index_payload:
@@ -280,10 +278,12 @@ class RedisBridge:
                 if not oi_payload:
                     missing.append("open_interest")
                 logger.info(
-                    f"Skipping intelligence for {asset}: "
-                    f"missing {missing} — waiting for REST sync to populate cache"
+                    f"Insufficient data for {asset}: missing {missing} "
+                    f"— broadcasting to frontend for removal"
                 )
-                return None  # Skip silently — don't broadcast insufficient_data
+                return self._build_insufficient_response(
+                    asset, missing, data_timestamps
+                )
 
             # Handle both WS ('p') and REST ('indexPrice') formats for index
             index_price = index_payload.get("p") or index_payload.get("indexPrice")

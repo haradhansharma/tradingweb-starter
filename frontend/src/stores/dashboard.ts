@@ -591,6 +591,10 @@ export function createDashboardStore(): DashboardStore {
   let wsUnsubscribers: Array<() => void> = [];
   // Timer to remove assets stuck on CONNECTING after WS is live
   let connectingTimer: ReturnType<typeof setTimeout> | null = null;
+  // Blacklist: assets removed by backend insufficient_data signal.
+  // Prevents auto-resurrection by index/indicator/futuresPrice handlers
+  // that would otherwise re-create the asset on every WS tick.
+  const _removedAssets = new Set<string>();
 
   // ── Path-to-nav mapping for URL-based active state ──
   const PATH_NAV_MAP: Record<string, string> = {
@@ -696,6 +700,7 @@ export function createDashboardStore(): DashboardStore {
       const currentPath = window.location.pathname;
       this.activeNav = PATH_NAV_MAP[currentPath] || 'dashboard';
 
+      _removedAssets.clear();  // Clear blacklist on fresh init (page reload)
       await this._fetchAvailableBrokers();
       await this._fetchActiveUnderlyings();
       await this._fetchIndicatorConfig();
@@ -719,6 +724,7 @@ export function createDashboardStore(): DashboardStore {
     },
 
     async _fetchActiveUnderlyings() {
+      _removedAssets.clear();  // Reset on fresh underlying fetch
       try {
         const resp = await fetch(`/api/market/active-underlyings?broker=${this.activeBroker}`);
         if (!resp.ok) {
@@ -837,7 +843,8 @@ export function createDashboardStore(): DashboardStore {
             }
           }
           // Auto-recovery: if asset was removed but index price arrives, re-create
-          if (!asset && this.activeUnderlyings.includes(symbol)) {
+          // GUARD: skip if asset was explicitly removed (insufficient_data)
+          if (!asset && this.activeUnderlyings.includes(symbol) && !_removedAssets.has(symbol)) {
             this.assets[symbol] = this._emptyAsset(symbol);
             this.assets[symbol].price = price;
             this.assets[symbol].basePrice = price;
@@ -872,7 +879,8 @@ export function createDashboardStore(): DashboardStore {
             asset.futuresPrice = price;
           }
           // Auto-recovery: if asset was removed but futures price arrives
-          if (!asset && this.activeUnderlyings.includes(underlying)) {
+          // GUARD: skip if asset was explicitly removed (insufficient_data)
+          if (!asset && this.activeUnderlyings.includes(underlying) && !_removedAssets.has(underlying)) {
             this.assets[underlying] = this._emptyAsset(underlying);
             this.assets[underlying].futuresPrice = price;
           }
@@ -937,7 +945,8 @@ export function createDashboardStore(): DashboardStore {
     _updateAssetFromIntelligence(underlying: string, intel: any) {
       // Auto-recovery: if asset was removed but data arrives, re-create it
       // and re-subscribe to WS channels.
-      if (!this.assets[underlying]) {
+      // GUARD: skip if asset was explicitly removed (insufficient_data)
+      if (!this.assets[underlying] && !_removedAssets.has(underlying)) {
         this.assets[underlying] = this._emptyAsset(underlying);
         // Re-add to activeUnderlyings if it was removed
         if (!this.activeUnderlyings.includes(underlying)) {
@@ -1020,7 +1029,8 @@ export function createDashboardStore(): DashboardStore {
     _updateAssetFromIndicators(underlying: string, data: any): void {
       // Auto-recovery: if asset was removed but indicator data arrives, re-create it
       // and re-subscribe to WS channels.
-      if (!this.assets[underlying]) {
+      // GUARD: skip if asset was explicitly removed (insufficient_data)
+      if (!this.assets[underlying] && !_removedAssets.has(underlying)) {
         this.assets[underlying] = this._emptyAsset(underlying);
         if (!this.activeUnderlyings.includes(underlying)) {
           this.activeUnderlyings.push(underlying);
@@ -1054,6 +1064,9 @@ export function createDashboardStore(): DashboardStore {
     },
 
     _removeAsset(underlying: string, reason?: string) {
+      // Add to blacklist so auto-recovery handlers don't resurrect it
+      _removedAssets.add(underlying);
+
       // Clean up flash timer if it exists
       const internal = this.assets[underlying] as InternalAssetState | undefined;
       if (internal && internal._flashTimer !== null) {

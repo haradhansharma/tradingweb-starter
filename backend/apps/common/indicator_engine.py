@@ -31,9 +31,10 @@ Workflow for adding a new strategy:
 
 Redis Keys:
   indicators:{SYMBOL}  → Hash { "1m_rsi_14": "62.4", "1h_ema_9": "98900", ... }
+  indicators:{SYMBOL}:strategies → String JSON [ { strategy decisions } ]
 
-Redis Pub/Sub (DB3):
-  Channel: "indicators:{SYMBOL}"  → { values, strategies } on recalculation
+WebSocket (Django Channels DB2):
+  Group: {broker}.{SYMBOL}.indicators  → { values, strategies } on recalculation
 """
 
 import json

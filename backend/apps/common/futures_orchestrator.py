@@ -313,9 +313,18 @@ class FuturesOrchestrator:
         if not candles_by_tf:
             return
 
+        # Extract current price from the latest candle for strategy scoring.
+        # Trend strategy needs price for EMA-stack (±2 pts) and SMA50 (±1 pt).
+        # Volatility strategy needs price for BB position (±2 pts).
+        # Without price, these strategies lose significant accuracy.
+        latest_candle = candles_by_tf.get("1m", [{}])[-1]
+        current_price = float(latest_candle.get("c", 0)) if latest_candle else None
+
         # Calculate indicators + strategy
         try:
-            enriched = self.engine.calculate_all_with_strategy(candles_by_tf)
+            enriched = self.engine.calculate_all_with_strategy(
+                candles_by_tf, price=current_price
+            )
         except Exception as e:
             logger.error(f"Indicator calculation failed for {symbol}: {e}")
             return

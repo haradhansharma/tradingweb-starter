@@ -4,17 +4,17 @@ Redis Bridge
 Bridges broker WebSocket data → Redis cache → Django Channel Layer → Frontend.
 
 Broker-agnostic: accepts a `broker` parameter to namespace all Redis keys,
-channel groups, and pub/sub channels. Adding a new broker only requires
+channel groups. Adding a new broker only requires
 registering it in broker_config.py — no changes to this file.
 
 Responsibilities:
   1. Cache normalized market data in Redis (canonical schema only).
-  2. Publish raw payloads to Redis Pub/Sub for external consumers.
-  3. Broadcast to Django Channel Layer groups for WebSocket consumers.
-  4. Trigger intelligence calculations on mark price updates (throttled).
-  5. Track data freshness and detect stale metrics.
-  6. Broadcast error notifications to connected clients.
+  2. Broadcast to Django Channel Layer groups for WebSocket consumers.
+  3. Trigger intelligence calculations on mark price updates (throttled).
+  4. Track data freshness and detect stale metrics.
+  5. Broadcast error notifications to connected clients.
 """
+
 
 import json
 import time
@@ -32,7 +32,6 @@ from .broker_config import (
     redis_key,
     redis_global_key,
     ws_group_name,
-    # pubsub_channel,
     DEFAULT_BROKER,
 )
 
@@ -67,7 +66,6 @@ class RedisBridge:
     def __init__(self, broker: str = DEFAULT_BROKER):
         self.broker = broker
         self.cache = aioredis.from_url(settings.CACHES["default"]["LOCATION"])
-        # self.pubsub = aioredis.from_url(settings.REDIS_PUBSUB_URL)
         self.channel_layer = get_channel_layer()
         self.engine = OptionIntelligenceEngine()
         self.last_intel_time: Dict[str, float] = {}  # {underlying: timestamp}
@@ -80,10 +78,7 @@ class RedisBridge:
             await self.cache.aclose()
         except Exception as e:
             logger.warning(f"Error closing cache connection: {e}")
-        # try:
-        #     await self.pubsub.aclose()
-        # except Exception as e:
-        #     logger.warning(f"Error closing pubsub connection: {e}")
+   
 
     # ------------------------------------------------------------------
     # Public: broadcast
@@ -134,12 +129,7 @@ class RedisBridge:
                     self.cache.set(cache_key, raw_payload, ex=self._cache_ttl(category))
                 )
 
-            # Pub/Sub (raw for external consumers)
-            # tasks.append(
-            #     self.pubsub.publish(
-            #         pubsub_channel(self.broker, underlying, category), raw_payload
-            #     )
-            # )
+ 
 
             # Channel Layer group send
             tasks.append(

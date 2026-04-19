@@ -654,11 +654,6 @@ export function createDashboardStore(): DashboardStore {
     marketSessions: null,
     indicatorConfig: null,
 
-    // ── Removed assets blacklist ──
-    // Assets removed via insufficient_data or explicit dismiss are tracked here
-    // to prevent auto-recovery from resurrecting them with late-arriving WS data.
-    _removedAssets: new Set<string>(),
-
     // ── Global Tooltip State (survives re-renders) ──
     tip: { visible: false, title: '', content: '', data: null, posX: 0, posY: 0, dir: 'above' },
     _tipHideTimer: null as ReturnType<typeof setTimeout> | null,
@@ -700,9 +695,6 @@ export function createDashboardStore(): DashboardStore {
       // Re-sync in case of SPA navigation
       const currentPath = window.location.pathname;
       this.activeNav = PATH_NAV_MAP[currentPath] || 'dashboard';
-
-      // Clear removed-assets blacklist on fresh init (page load or broker switch)
-      this._removedAssets.clear();
 
       await this._fetchAvailableBrokers();
       await this._fetchActiveUnderlyings();
@@ -759,10 +751,12 @@ export function createDashboardStore(): DashboardStore {
         const resp = await fetch('/api/market/indicator-config');
         if (!resp.ok) return;
         this.indicatorConfig = await resp.json();
-        // Expose to window globals for mockupChartRenderer (non-Alpine context)
-        (window as any)._mockConfig = this.indicatorConfig;
+        // Expose to window globals for chartRenderer (non-Alpine context)
+        (window as any)._indicatorConfig = this.indicatorConfig;
         (window as any)._activeBroker = this.activeBroker;
-        console.log('[Dashboard] Indicator config loaded, _mockConfig set:', Object.keys(this.indicatorConfig.indicators || {}).join(', '));
+        console.log('[Dashboard] Indicator config loaded:', Object.keys(this.indicatorConfig.indicators || {}).join(', '));
+        // Signal waiting chart cards that config is ready
+        window.dispatchEvent(new CustomEvent('init-charts'));
       } catch (e) {
         console.warn('[Dashboard] Failed to fetch indicator config:', e);
       }
@@ -941,13 +935,8 @@ export function createDashboardStore(): DashboardStore {
     // ═══════════════════════════════════════
 
     _updateAssetFromIntelligence(underlying: string, intel: any) {
-      // Block auto-recovery for explicitly removed assets.
-      // Prevents late-arriving WS data from resurrecting an asset that was
-      // removed due to insufficient_data or user dismiss.
-      if (this._removedAssets.has(underlying)) return;
-
-      // Auto-recovery: if asset was removed (e.g. page refresh) but data
-      // arrives, re-create it and re-subscribe to WS channels.
+      // Auto-recovery: if asset was removed but data arrives, re-create it
+      // and re-subscribe to WS channels.
       if (!this.assets[underlying]) {
         this.assets[underlying] = this._emptyAsset(underlying);
         // Re-add to activeUnderlyings if it was removed
@@ -1029,11 +1018,8 @@ export function createDashboardStore(): DashboardStore {
     },
 
     _updateAssetFromIndicators(underlying: string, data: any): void {
-      // Block auto-recovery for explicitly removed assets.
-      if (this._removedAssets.has(underlying)) return;
-
-      // Auto-recovery: if asset was removed (e.g. page refresh) but indicator
-      // data arrives, re-create it and re-subscribe to WS channels.
+      // Auto-recovery: if asset was removed but indicator data arrives, re-create it
+      // and re-subscribe to WS channels.
       if (!this.assets[underlying]) {
         this.assets[underlying] = this._emptyAsset(underlying);
         if (!this.activeUnderlyings.includes(underlying)) {
@@ -1082,9 +1068,6 @@ export function createDashboardStore(): DashboardStore {
       if (idx !== -1) {
         this.activeUnderlyings.splice(idx, 1);
       }
-
-      // Add to removed-assets blacklist to prevent auto-recovery
-      this._removedAssets.add(underlying);
 
       // Unsubscribe from WS channels for this asset
       const ws = this.ws;
@@ -1222,7 +1205,7 @@ export function createDashboardStore(): DashboardStore {
       if (broker === this.activeBroker) return;
       const oldBroker = this.activeBroker;
       this.activeBroker = broker;
-      // Keep window global in sync for mockupChartRenderer
+      // Keep window global in sync for chartRenderer
       (window as any)._activeBroker = broker;
 
       // Unsubscribe from all old broker channels
